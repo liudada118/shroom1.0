@@ -571,6 +571,91 @@ async function snapshot(page) {
   return page.evaluate(() => window.exhibitionHome.com.current.getSnapshot());
 }
 
+/** 比较公开视角快照的数值，允许控制器归一化产生浮点尾差。 */
+function assertViewSnapshotSame(actual, expected, message) {
+  assert.equal(actual.schemaVersion, expected.schemaVersion, message);
+  assert.equal(actual.flipX, expected.flipX, `${message}：水平翻转`);
+  assert.equal(actual.flipY, expected.flipY, `${message}：纵向翻转`);
+  for (const group of ['object', 'camera']) for (const key of Object.keys(expected[group])) {
+    const left = actual[group][key], right = expected[group][key];
+    assert.ok(Array.isArray(right) ? right.every((value, index) => Math.abs(value - left[index]) < 1e-7)
+      : Math.abs(left - right) < 1e-7, `${message}：${group}.${key}`);
+  }
+}
+
+/** 通过真实工具保存视角，切模式与尺寸后验证展示设置不会混入压力或设备姿态。 */
+async function verifyMotionViewPersistence(page) {
+  await sendOrientationFrame(page, 'hand0205', 'right', 35, [0, .31, 0, .95]);
+  await sendOrientationFrame(page, 'hand0205', 'right', 35, [.35, .15, 0, .92]);
+  await waitMotionRotated(page, 'right');
+  const before = await snapshot(page);
+  await page.getByRole('button', { name: '工具', exact: true }).click();
+  await page.getByRole('tab', { name: '视角调节', exact: true }).click();
+  await page.getByRole('button', { name: 'X 轴 +30°', exact: true }).click();
+  await page.getByRole('button', { name: '放大', exact: true }).click();
+  await page.getByRole('tab', { name: '数据处理', exact: true }).click();
+  await page.getByRole('button', { name: '水平翻转', exact: true }).click();
+  await page.getByRole('button', { name: '纵向翻转', exact: true }).click();
+  await page.waitForFunction(() => {
+    const state = window.exhibitionHome.com.current.getViewTools().getState();
+    return state.flipX && state.flipY;
+  });
+  const changed = await page.evaluate(() => window.exhibitionHome.com.current.getViewTools().getSnapshot());
+  assert.ok(Math.abs(changed.object.quaternion[0]) > .1, '真实 X 轴按钮改变展示父组');
+  const storageKey = `shroom.workspaceView.v1:${JSON.stringify(['hand0205', 'gloveMotion'])}`;
+  await page.waitForFunction(({ key, expected }) => {
+    const value = JSON.parse(localStorage.getItem(key) || 'null');
+    return value?.flipX === true && value?.flipY === true
+      && value.object.quaternion.every((number, index) => Math.abs(number - expected.object.quaternion[index]) < 1e-7);
+  }, { key: storageKey, expected: changed });
+  const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey);
+  assertViewSnapshotSame(saved, changed, '实际工具操作已持久化');
+  const afterTools = await snapshot(page);
+  for (const side of ['left', 'right']) {
+    assertMotionDataSame(afterTools.hands[side], before.hands[side], '视角/镜像不改压力和手指');
+    assertQuaternionSame(afterTools.hands[side].quaternion, before.hands[side].quaternion, '视角/镜像不改设备姿态');
+  }
+  await page.locator('#portal-utility-panel header button').click();
+  await choose(page, '显示方式', '热力地图');
+  await waitRenderer(page, 'gloveTerrain');
+  const terrainView = await page.evaluate(() => window.exhibitionHome.com.current.getViewTools().getSnapshot());
+  assert.equal(terrainView.flipX, false, 'Motion 镜像不串入地形模式');
+  assert.equal(terrainView.flipY, false, 'Motion 纵向翻转不串入地形模式');
+  await choose(page, '显示方式', '炫酷摇操');
+  await waitRenderer(page, 'gloveMotion');
+  await page.waitForFunction((expected) => {
+    const value = window.exhibitionHome.com.current.getViewTools().getSnapshot();
+    return value.flipX && value.flipY && value.camera.position.every((number, index) => Math.abs(number - expected.camera.position[index]) < 1e-7);
+  }, saved);
+  assertViewSnapshotSame(await page.evaluate(() => window.exhibitionHome.com.current.getViewTools().getSnapshot()), saved, '切回 Motion 自动恢复');
+  await page.waitForFunction((expected) => {
+    const state = window.exhibitionHome.com.current.getSnapshot();
+    return ['left', 'right'].every((side) => state.hands[side].pressureTotal === expected.hands[side].pressureTotal
+      && state.hands[side].fingers.every((value, index) => Math.abs(value - expected.hands[side].fingers[index]) < .0001));
+  }, before);
+  const restoredData = await snapshot(page);
+  for (const side of ['left', 'right']) assertMotionDataSame(restoredData.hands[side], before.hands[side], '重挂继续使用本侧末帧');
+  await page.screenshot({ path: join(screenshots, 'motion-view-persistence-restored.png') });
+  await page.setViewportSize({ width: 1180, height: 780 });
+  await page.waitForTimeout(500);
+  assertViewSnapshotSame(await page.evaluate(() => window.exhibitionHome.com.current.getViewTools().getSnapshot()), saved, 'resize 不覆盖已恢复镜头');
+  await page.screenshot({ path: join(screenshots, 'motion-view-persistence-resized.png') });
+  await sendOrientationFrame(page, 'hand0205', 'right', 35, [-.24, .19, -.16, .93]);
+  await waitMotionRotated(page, 'right');
+  assertViewSnapshotSame(await page.evaluate(() => window.exhibitionHome.com.current.getViewTools().getSnapshot()), saved, '设备新姿态不覆盖展示快照');
+  assert.equal((await snapshot(page)).hands.right.pressureTotal, 147 * 35);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: '工具', exact: true }).click();
+  await page.getByRole('tab', { name: '视角调节', exact: true }).click();
+  await page.getByRole('button', { name: '恢复视角', exact: true }).click();
+  await page.waitForFunction((key) => {
+    const value = JSON.parse(localStorage.getItem(key) || 'null');
+    return value && !value.flipX && !value.flipY && value.object.quaternion.slice(0, 3).every((number) => Math.abs(number) < 1e-7);
+  }, storageKey);
+  await page.locator('#portal-utility-panel header button').click();
+  console.log('MOTION_VIEW_PERSISTENCE_PASS', JSON.stringify({ storageKey, screenshots }));
+}
+
 /** 等待真实场景挂载与模型加载完成，同时捕获未处理页面异常。 */
 async function waitRenderer(page, mode) {
   await page.waitForFunction((expected) => {
@@ -775,6 +860,7 @@ try {
   assert.equal((await snapshot(page)).hands.left.quaternionResets, beforeBareReset.hands.left.quaternionResets,
     '单手旧裸事件只作用于当前显示右手');
   await page.screenshot({ path: join(screenshots, 'motion-single-reset.png') });
+  await verifyMotionViewPersistence(page);
 
   await choose(page, '显示方式', '热力地图');
   await waitRenderer(page, 'gloveTerrain');

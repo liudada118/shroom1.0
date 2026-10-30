@@ -1407,6 +1407,7 @@ function beginCollectionEvidence(runtime) {
   const knownNative = appRuntime.builtinTemplates.catalog.some(template => template.id === sourceType);
   const definition = appRuntime.displaySystems.getById(systemId);
   return collectionSessions.begin({ recordKey: runtime.saveTime, systemId, configuration, storagePolicy: runtime.collectOptions || null,
+    usageProperties: readUsageSystemContext(),
     inputCoverage: knownNative ? 'synchronous' : definition?.sensors ? 'fenced' : 'untracked' });
 }
 
@@ -2266,8 +2267,6 @@ registerRuntimeCommandHandlers(controlCommandRouter, {
   normalizeSmallBed12BDisplayOptions,
   resetCollectionStorageClock,
   flushCollectionInsertQueues,
-  getCollectionWriteStats: collectionInsertQueueService.getStats,
-  getUsageContext: readUsageSystemContext,
   startPlaybackTimer,
   stopPlaybackTimer,
   getRuntime: () => ({

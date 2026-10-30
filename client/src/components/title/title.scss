@@ -192,6 +192,15 @@
     color: #468493 !important;
 }
 
+.tuning-range-setting {
+    margin: 8px 0 16px;
+    color: var(--portal-text, #edf5ff);
+    .tuning-range-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .tuning-range-hint { margin-top: 6px; font-size: 13px; line-height: 1.5; color: var(--portal-muted, #adc4d9); }
+    .ant-input-number { background: #0b1b29; border-color: #3e596e; color: inherit; }
+    .ant-input-number-input { color: inherit; }
+}
+
 .dataTitle {
     color: #468493;
     min-width: 120px;

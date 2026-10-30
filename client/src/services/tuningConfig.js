@@ -2,7 +2,31 @@ import { selectedNativeSystemId } from '../displays/nativeSystemTemplates';
 
 const STORAGE_KEY = 'valueConfig';
 const EXPLICIT_FIELDS = '__explicitTuningFields';
-const FIELDS = ['valueg1', 'valuej1', 'valuel1', 'valuef1', 'value1', 'valuelInit1', 'sizeValue', 'speedValue', 'terrainBaseGain'];
+const FIELDS = ['valueg1', 'valuej1', 'valuel1', 'valuef1', 'value1', 'valuelInit1', 'sizeValue', 'speedValue', 'terrainBaseGain', 'colorSliderMax', 'edgeBuffer1'];
+export const COLOR_SLIDER_LIMIT = { min: 5, max: 65535 };
+
+/** 新增显示参数只接受范围内整数，损坏缓存不能改变点图尺寸或颜色范围。 */
+function validDisplaySetting(field, value) {
+  if (field === 'colorSliderMax') return Number.isInteger(value) && value >= COLOR_SLIDER_LIMIT.min && value <= COLOR_SLIDER_LIMIT.max;
+  if (field === 'edgeBuffer1') return Number.isInteger(value) && value >= 0 && value <= 16;
+  return true;
+}
+
+/** 旧配置没有滑块上限时容纳当前颜色值，避免默认颜色超出滑块可选范围。 */
+export function resolveColorSliderMax(configuredMax, currentColor, defaultMax = 1000) {
+  if (Number.isFinite(configuredMax) && validDisplaySetting('colorSliderMax', configuredMax)) return configuredMax;
+  return Math.min(COLOR_SLIDER_LIMIT.max, Math.max(COLOR_SLIDER_LIMIT.min, defaultMax,
+    Number.isFinite(currentColor) ? Math.ceil(currentColor) : 0));
+}
+
+/** 恢复配置时清掉前一个系统的可选项，并使颜色值服从该系统已保存的上限。 */
+export function normalizeDisplayTuning(config) {
+  const next = { colorSliderMax: undefined, edgeBuffer1: undefined, ...config };
+  if (Number.isFinite(next.colorSliderMax) && Number.isFinite(next.valuej1)) {
+    next.valuej1 = Math.max(COLOR_SLIDER_LIMIT.min, Math.min(next.colorSliderMax, next.valuej1));
+  }
+  return next;
+}
 
 /** 读取旧版兼容缓存，损坏记录或不可用存储不能阻止进入系统。 */
 function readCache() {
@@ -28,7 +52,7 @@ export function readTuningConfig(options) {
   for (const record of records(options)) {
     for (const field of FIELDS) {
       const value = record[field];
-      if ((typeof value === 'number' || (typeof value === 'string' && value.trim())) && Number.isFinite(Number(value))) {
+      if ((typeof value === 'number' || (typeof value === 'string' && value.trim())) && Number.isFinite(Number(value)) && validDisplaySetting(field, Number(value))) {
         result[field] = Number(value);
       }
     }
@@ -47,7 +71,7 @@ export function hasExplicitTuningValue(options, field) {
 
 /** 按真实系统和显示模式保存一个参数，保留其他系统与未知历史字段。 */
 export function writeTuningConfig({ sensorType, systemId, mode, valueType, value }) {
-  if (!FIELDS.includes(valueType) || !Number.isFinite(value)) return false;
+  if (!FIELDS.includes(valueType) || !Number.isFinite(value) || !validDisplaySetting(valueType, value)) return false;
   const identity = systemId || selectedNativeSystemId(sensorType);
   if (!identity) return false;
   const cache = readCache(), key = mode ? `${identity}__${mode}` : identity;

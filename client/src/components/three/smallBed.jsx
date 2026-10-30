@@ -2,6 +2,8 @@ import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
 import { createPointViewTools } from './pointViewTools';
 import { installParticleEntrance } from '../../renderers/particleEntrance';
+import { createEdgeBufferPoints } from '@shroom/frontend/renderers/pointGrid/react/edgeBufferPoints.js';
+import { normalizeEdgeBuffer } from '@shroom/frontend/renderers/pointGrid/core/edgeBuffer.js';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // import { FlyControls } from 'three/examples/jsm/controls/FlyControls.js';
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
@@ -44,6 +46,7 @@ const sitnum1 = props.matrixWidth || 32;
 const sitnum2 = props.matrixHeight || 32;
 const sitInterp = 2;
 const sitOrder = 0;
+const edgeBufferRef = useRef(2);
 const xStretch = props.xStretch || 2;
 const baseAmountX = sitnum1 * sitInterp + sitOrder * 2;
 const baseAmountY = sitnum2 * sitInterp + sitOrder * 2;
@@ -107,6 +110,7 @@ let isShiftPressed = false;
 
   let camera, scene, renderer;
   let disposeParticleEntrance, portalResizeObserver;
+  let edgeBufferPoints;
   let controls;
   let cube, chair, mixer, clips;
   const clock = new THREE.Clock();
@@ -430,6 +434,8 @@ let isShiftPressed = false;
     sitGeometry.setAttribute("scale", new THREE.BufferAttribute(scales, 1));
     sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     particles = new THREE.Points(sitGeometry, material);
+    edgeBufferPoints = createEdgeBufferPoints({ points: particles, rows: baseAmountX, columns: baseAmountY,
+      rowStretch: xStretch, positionAt: (row, col) => [row * SEPARATION - AMOUNTX * SEPARATION / 2, col * SEPARATION - AMOUNTY * SEPARATION / 2] });
 
     particles.scale.x = 0.0062;
     particles.scale.y = 0.0062;
@@ -579,13 +585,15 @@ let isShiftPressed = false;
       sitOrder
     );
 
-    gaussBlur_1(
+    if (valueg1 > 0) gaussBlur_1(
       bigArrs,
       bigArrg,
       sitnum1 * sitInterp + sitOrder * 2,
       sitnum2 * sitInterp + sitOrder * 2,
       valueg1
     );
+    else bigArrg = Array.from(bigArrs);
+    edgeBufferPoints?.update(bigArrs, baseAmountX, baseAmountY, valueg1, edgeBufferRef.current);
 
     bodyArr = []
 
@@ -620,7 +628,7 @@ let isShiftPressed = false;
 
     for (let ix = 0; ix < AMOUNTX; ix++) {
       for (let iy = 0; iy < AMOUNTY; iy++) {
-        const value = bigArrg1New[l] * 10;
+        const value = (edgeBufferPoints?.sample(l, bigArrg1New[l]) ?? bigArrg1New[l]) * 10;
 
         //柔化处理smooth
         smoothBig[l] = smoothBig[l] + (value - smoothBig[l]) / valuel1;
@@ -655,6 +663,7 @@ let isShiftPressed = false;
         l++;
       }
     }
+    edgeBufferPoints?.render({ height: value1, color: (value) => jetWhite4(0, valuej1, value), smoothedValues: smoothBig });
     if (!sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
       dataArrRef.current = bigArrg1New
     }
@@ -763,7 +772,8 @@ let isShiftPressed = false;
   // 座椅数据
   function sitValue(prop) {
 
-    const { valuej, valueg, value, valuel, valuef, valuelInit, ymax, compen, press } = prop;
+    const { valuej, valueg, value, valuel, valuef, valuelInit, ymax, compen, press, edgeBuffer } = prop;
+    if (edgeBuffer !== undefined) edgeBufferRef.current = normalizeEdgeBuffer(edgeBuffer, edgeBufferRef.current);
     if (valuej !== undefined) valuej1 = valuej;
     if (valueg !== undefined) valueg1 = valueg;
     if (value !== undefined) value1 = value;
@@ -857,6 +867,8 @@ let isShiftPressed = false;
   useImperativeHandle(refs, () => ({
     /** 返回当前点图的视角工具，切换渲染器后不复用旧场景。 */
     getViewTools: () => workspaceViewRef.current,
+    /** 只对规则点图暴露边缘缓冲调节。 */
+    getTuningControls: () => ({ showGuass: true, showColor: true, showFilter: true, showHeight: true, showConsis: true, showInit: true, showEdgeBuffer: true, edgeBufferDefault: 2 }),
 
     sitData: sitData,
     changeDataFlag: changeDataFlag,
@@ -927,9 +939,10 @@ let isShiftPressed = false;
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      disposeParticleEntrance?.();
+      edgeBufferPoints?.dispose();
       workspaceViewRef.current?.dispose();
       workspaceViewRef.current = null;
-      disposeParticleEntrance?.();
       portalResizeObserver?.disconnect();
       controls?.dispose();
       document.removeEventListener('pointerdown', pointDown)

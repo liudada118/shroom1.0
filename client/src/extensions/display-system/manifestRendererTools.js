@@ -2,10 +2,11 @@ const MATRIX_RENDERERS = new Set(['pointGrid', 'numMatrix', 'webglHeatmap', 'blo
 const EMPTY_CONTROLS = {
   showGuass: false, showSize: false, showSpeed: false, showColor: false,
   showFilter: false, showHeight: false, showConsis: false, showInit: false,
+  showEdgeBuffer: false,
 };
 
 const TUNING_CONTROLS = { valueg: 'showGuass', valuej: 'showColor', valuef: 'showFilter',
-  value: 'showHeight', valuel: 'showConsis', valuelInit: 'showInit' };
+  value: 'showHeight', valuel: 'showConsis', valuelInit: 'showInit', edgeBuffer: 'showEdgeBuffer' };
 
 /** 汇总当前可见矩阵画布的句柄，延迟挂载和切换视图后重放展示调参。 */
 export function createManifestRendererTools() {
@@ -35,10 +36,15 @@ export function createManifestRendererTools() {
     const widget = widgets.find((entry) => entry.id === 'main') || widgets[0];
     if (!widget) return { ...EMPTY_CONTROLS };
     const extended = widget.type !== 'numMatrix';
+    const edgeControls = widget.type === 'pointGrid' ? primary()?.getTuningControls?.() : null;
+    // 异步挂载前保留规则矩阵的已保存边宽；公开能力仍由 getTuningControls 等待真实实例。
+    const pendingRegularGrid = widget.type === 'pointGrid' && !primary() && !widget.rendererParams?.points?.length;
     return { ...EMPTY_CONTROLS, showColor: true,
       showFilter: widget.type !== 'numMatrix' || widget.rendererParams?.frameInput !== 'raw',
       showGuass: extended, showHeight: widget.type === 'pointGrid',
-      showConsis: extended, showInit: extended };
+      showConsis: extended, showInit: extended,
+      showEdgeBuffer: edgeControls?.showEdgeBuffer === true || pendingRegularGrid,
+      edgeBufferDefault: edgeControls?.edgeBufferDefault };
   };
 
   /** 视图切换的间隙拒绝旧滑块发送当前模式不支持的参数。 */

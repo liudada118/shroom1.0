@@ -8,6 +8,18 @@ export function playbackLabelText(label) {
   return '';
 }
 
+/** 将历史记录的秒或毫秒时间戳显示为本地日期；短数字 ID 和自定义名称不转换。 */
+function formatPlaybackTimestamp(value) {
+  const text = String(value).trim();
+  const match = /^(\d{10}|\d{12,13})(?:\.\d+)?$/.exec(text);
+  if (!match) return '';
+  const date = new Date(Number(text) * (match[1].length === 10 ? 1000 : 1));
+  if (!Number.isFinite(date.getTime())) return '';
+  const parts = [date.getMonth() + 1, date.getDate(), date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map((part) => String(part).padStart(2, '0'));
+  return `${date.getFullYear()}-${parts[0]}-${parts[1]} ${parts[2]}:${parts[3]}:${parts[4]}`;
+}
+
 /** 保留记录的原始 ID，剔除空 ID 和重复条目以免选错采集批次。 */
 export function normalizePlaybackRecords(records) {
   const seen = new Set();
@@ -19,8 +31,10 @@ export function normalizePlaybackRecords(records) {
     const key = `${typeof value}:${value}`;
     if (seen.has(key)) return [];
     seen.add(key);
-    const label = playbackLabelText(record.label).trim() || String(value);
-    return [{ ...record, value, key, label, disabled: Boolean(record.disabled) }];
+    const originalLabel = playbackLabelText(record.label).trim() || String(value);
+    const label = formatPlaybackTimestamp(originalLabel) || originalLabel;
+    const detail = label !== String(value) && !formatPlaybackTimestamp(value) ? String(value) : '';
+    return [{ ...record, value, key, label, detail, disabled: Boolean(record.disabled) }];
   });
 }
 

@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createMotionOrientation, resetMotionOrientation, updateMotionOrientation } from './motionOrientation';
 import { createMotionCalibration, resolveMotionBends, updateMotionCalibration } from './motionCalibration';
+import { createWorkspaceViewTools } from '../../../renderers/workspaceViewTools';
 import './gloveMotion.css';
 
 const MODEL_URL = './glove-motion/hand.glb';
@@ -197,9 +198,11 @@ function createMotionScene(mount, state) {
   const clock = new THREE.Clock();
   let disposed = false;
   let frameId;
-  let flippedX = false;
-  let flippedY = false;
+  let userView = false;
   let framingDistance = 15;
+  /** 手动操作后保留用户镜头，模型迟到或侧栏尺寸变化不再覆盖。 */
+  const markUserView = () => { userView = true; };
+  controls.addEventListener('start', markUserView);
 
   /** 按当前可见手数摆放，不将缺失手帧复制到另一侧。 */
   function configure() {
@@ -234,8 +237,10 @@ function createMotionScene(mount, state) {
     const contentWidth = modelWidth * scale + (state.dual ? 3.8 : 0);
     framingDistance = Math.max(12, modelHeight * scale / (2 * Math.tan(Math.PI / 9)),
       contentWidth / (2 * Math.tan(Math.PI / 9) * camera.aspect * centralRatio)) * 1.12;
-    camera.position.copy(CAMERA_DIRECTION).multiplyScalar(framingDistance);
-    controls.target.set(0, 0, 0);
+    if (!userView) {
+      camera.position.copy(CAMERA_DIRECTION).multiplyScalar(framingDistance);
+      controls.target.set(0, 0, 0);
+    }
     camera.updateProjectionMatrix();
     configure();
   }
@@ -368,35 +373,53 @@ function createMotionScene(mount, state) {
   observer.observe(mount);
   resize();
   animate();
+  const viewTools = createWorkspaceViewTools({ object: view, camera, controls });
 
   /** 恢复画布视角，不改变设备姿态或校准基准。 */
   function resetView() {
-    view.rotation.set(0, 0, 0);
-    view.scale.set(1, 1, 1);
-    flippedX = false; flippedY = false;
+    if (disposed) return false;
+    viewTools.reset(); userView = false;
     camera.position.copy(CAMERA_DIRECTION).multiplyScalar(framingDistance);
+    camera.up.set(0, 1, 0);
     controls.target.set(0, 0, 0);
-    controls.update();
+    controls.update(); viewTools.notifyChange(); return true;
   }
 
   const tools = {
-    getState: () => ({ available: !disposed, selectionSafe: false, flipX: flippedX, flipY: flippedY }),
-    rotate: (axis, direction) => { if (['x', 'y', 'z'].includes(axis)) view.rotation[axis] += direction * Math.PI / 6; },
-    top: () => { camera.position.set(0, 15, 0.01); controls.target.set(0, 0, 0); controls.update(); },
-    zoom: (direction) => { camera.position.sub(controls.target).multiplyScalar(direction > 0 ? 0.85 : 1 / 0.85).clampLength(7, 90).add(controls.target); controls.update(); },
-    flip: (axis) => { if (axis === 'x') { flippedX = !flippedX; view.scale.x = flippedX ? -1 : 1; }
-      if (axis === 'y') { flippedY = !flippedY; view.scale.z = flippedY ? -1 : 1; } },
+    ...viewTools,
+    /** 手套姿态由设备驱动，不对外提供平面框选。 */
+    getState: () => ({ ...viewTools.getState(), selectionSafe: false }),
+    /** 有效恢复后锁定展示镜头，后续模型加载不会改回自动构图。 */
+    restoreSnapshot(snapshot) { const restored = viewTools.restoreSnapshot(snapshot); if (restored) userView = true; return restored; },
+    /** 工具旋转只调整展示父组，不写入左右手设备四元数。 */
+    rotate(axis, direction) { const changed = viewTools.rotate(axis, direction); if (changed) userView = true; return changed; },
+    /** 沿现有手套俯视方向定位，并保存用户选择。 */
+    top() {
+      if (disposed) return false;
+      userView = true; camera.position.set(0, 15, 0.01); controls.target.set(0, 0, 0);
+      controls.update(); viewTools.notifyChange(); return true;
+    },
+    /** 保留手套原有的七至九十距离范围。 */
+    zoom(direction) {
+      if (disposed || !Number.isFinite(direction)) return false;
+      userView = true;
+      camera.position.sub(controls.target).multiplyScalar(direction > 0 ? 0.85 : 1 / 0.85).clampLength(7, 90).add(controls.target);
+      controls.update(); viewTools.notifyChange(); return true;
+    },
+    /** 镜像仅作用于展示父组，沿用共同快照中的镜像状态。 */
+    flip(axis) { const changed = viewTools.flip(axis); if (changed) userView = true; return changed; },
     reset: resetView,
   };
 
   return { updateFrame, resetQuaternion, syncCalibration, configure, getSnapshot, tools,
     /** 取消帧循环与待加载回调，并释放本场景全部GPU资源。 */
     dispose() {
+      viewTools.dispose();
       disposed = true;
       abort.abort();
       cancelAnimationFrame(frameId);
       observer.disconnect();
-      controls.dispose();
+      controls.removeEventListener('start', markUserView); controls.dispose();
       disposeObject(scene);
       renderer.dispose();
       renderer.forceContextLoss();

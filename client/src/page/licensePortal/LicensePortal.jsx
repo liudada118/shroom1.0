@@ -174,8 +174,10 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     // ⚠️ 用户编辑后只接受该次验证回执，后台旧密钥广播不能恢复已清空的列表。
     const saved = savedLicenseRef.current;
     if (!saved.bootstrapped && !keyEditedRef.current && saved.key && saved.key === keyRef.current.trim() && saved.message) {
-      saved.bootstrapped = true;
-      setScope(readPortalLicenseScope(saved.message));
+      if (entryRef.current?.restore({ key: saved.key, payload: saved.message })) {
+        saved.bootstrapped = true;
+        setScope(readPortalLicenseScope(saved.message));
+      }
     }
     if (data.displaySystemsUpdated) setReload((value) => value + 1);
     if (data.managedSystemAccessError) {
@@ -191,7 +193,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     setScope(undefined);
     setLicenseAccess(undefined);
     cancelNavigation();
-    entryRef.current?.cancel();
+    entryRef.current?.invalidate();
     setError(i18n.t('monitorUi.connectionLost'));
   }, [cancelNavigation]);
 
@@ -275,7 +277,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     return () => controller.abort();
   }, [reload, connected]);
 
-  /** Agent 的“进入系统”只触发一次，仍经密钥验证和现有切换命令；缺少密钥时留在目标列表。 */
+  /** Agent 的“进入系统”只触发一次，复用已验证身份后走现有切换命令。 */
   useEffect(() => {
     if (params.get('agentEnter') !== '1' || loading) return;
     const targetId = params.get('system');
@@ -305,7 +307,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   const changeKey = (key) => {
     keyEditedRef.current = true;
     if (key.trim() !== keyRef.current.trim()) {
-      entryRef.current?.cancel();
+      entryRef.current?.invalidate();
       savedLicenseRef.current.message = null;
       setScope(undefined);
       setLicenseAccess(undefined);

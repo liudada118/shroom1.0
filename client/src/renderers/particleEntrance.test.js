@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { captureParticleProjection, installParticleEntrance, mapParticleOrigins, patchParticleShader } from './particleEntrance';
+import { createEdgeBufferPoints } from '@shroom/frontend/renderers/pointGrid/react/edgeBufferPoints.js';
 
 vi.mock('gsap', () => ({ default: { to: vi.fn((target, options) => {
   target.value = options.value;
@@ -21,6 +22,91 @@ function fixture() {
 }
 
 describe('正式压力点图接续预览粒子', () => {
+  it('开始回调中取消不会创建迟到动画或遗留入口绑定', async () => {
+    const { points, scene, camera, rect } = fixture();
+    const material = points.material;
+    const canvas = { getBoundingClientRect: () => rect, dataset: {} };
+    const renderer = { domElement: canvas, getPixelRatio: () => 1, getClearAlpha: () => 1,
+      setClearAlpha: vi.fn(), render: vi.fn() };
+    const dispose = installParticleEntrance(renderer, scene, camera, points);
+    const controller = new AbortController();
+    const count = gsap.to.mock.calls.length;
+    await canvas.shroomParticleEntrance.play(captureParticleProjection(points, camera, rect),
+      { signal: controller.signal, onStart: () => controller.abort() });
+    expect(gsap.to).toHaveBeenCalledTimes(count);
+    expect(points.material).toBe(material);
+    expect(points.userData.particleEntrance).toBeUndefined();
+    expect(points.geometry.attributes.portalOrigin).toBeUndefined();
+    dispose();
+  });
+  it('边框跟随主图进度和最近粒子的起点，动态换几何和取消都清理临时资源', async () => {
+    const { points, scene, camera, rect } = fixture();
+    const originalMaterial = points.material;
+    const disposeOriginal = vi.spyOn(originalMaterial, 'dispose');
+    const edge = createEdgeBufferPoints({ points, rows: 1, columns: 2, positionAt: (row, col) => [col * 2 - 1, row * 2] });
+    const pressure = [20, 40];
+    /** 复用正式边框更新路径，模拟动画中保存的边宽到达或用户调宽。 */
+    const resizeEdge = (width) => {
+      edge.update(pressure, 2, 1, 0, width);
+      edge.render({ height: 1, smoothedValues: pressure, color: () => [255, 255, 255] });
+    };
+    resizeEdge(2);
+    const border = points.children[0];
+    const canvas = { getBoundingClientRect: () => rect, dataset: {} };
+    const renderer = { domElement: canvas, getPixelRatio: () => 1, getClearAlpha: () => 1,
+      setClearAlpha: vi.fn(), render: vi.fn() };
+    const dispose = installParticleEntrance(renderer, scene, camera, points, { rows: 1, cols: 2 });
+    const source = captureParticleProjection(points, camera, rect);
+    let tween;
+    gsap.to.mockImplementationOnce((target, options) => {
+      tween = { target, options, kill: vi.fn() };
+      return tween;
+    });
+    const controller = new AbortController();
+    const playing = canvas.shroomParticleEntrance.play(source, { signal: controller.signal });
+    const mainShader = { uniforms: {}, vertexShader: '#include <fog_vertex>', fragmentShader: '#include <color_fragment>' };
+    const edgeShader = { uniforms: {}, vertexShader: '#include <fog_vertex>', fragmentShader: '#include <color_fragment>' };
+    points.material.onBeforeCompile(mainShader);
+    border.material.onBeforeCompile(edgeShader);
+    expect(edgeShader.uniforms.portalProgress).toBe(mainShader.uniforms.portalProgress);
+    expect(border.material).not.toBe(originalMaterial);
+    const temporaryMaterial = border.material;
+    const disposeTemporary = vi.spyOn(temporaryMaterial, 'dispose');
+    tween.target.value = .4; tween.options.onUpdate();
+    const oldGeometry = border.geometry;
+    resizeEdge(4);
+    expect(border.geometry).not.toBe(oldGeometry);
+    expect(oldGeometry.attributes.portalOrigin).toBeUndefined();
+    expect(border.geometry.attributes.portalOrigin.count).toBe(border.geometry.attributes.position.count);
+    const anchors = border.userData.particleEntranceAnchors;
+    for (let index = 0; index < anchors.length; index++) {
+      const anchor = anchors[index];
+      expect([...border.geometry.attributes.portalOrigin.array.slice(index * 3, index * 3 + 3)])
+        .toEqual([...points.geometry.attributes.portalOrigin.array.slice(anchor * 3, anchor * 3 + 3)]);
+    }
+    expect(border.geometry.attributes.portalAlpha.array.every(alpha => alpha === 0)).toBe(true);
+    expect(edgeShader.uniforms.portalProgress.value).toBe(.4);
+    resizeEdge(0); expect(border.visible).toBe(false);
+    resizeEdge(2); expect(border.geometry.attributes.portalOrigin.count).toBe(28);
+    const gpuDisposal = [];
+    points.geometry.addEventListener('dispose', () => gpuDisposal.push(Boolean(points.geometry.attributes.portalOrigin)));
+    border.geometry.addEventListener('dispose', () => gpuDisposal.push(Boolean(border.geometry.attributes.portalOrigin)));
+    controller.abort(); await playing;
+    expect(gpuDisposal).toEqual([true, true]);
+    expect(tween.kill).toHaveBeenCalledOnce();
+    expect(border.material).toBe(originalMaterial);
+    expect(points.material).toBe(originalMaterial);
+    expect(border.geometry.attributes.portalOrigin).toBeUndefined();
+    expect(points.userData.particleEntrance).toBeUndefined();
+    expect(disposeTemporary).toHaveBeenCalledOnce();
+    expect(disposeOriginal).not.toHaveBeenCalled();
+    const previousPositions = points.geometry.attributes.position.array.slice();
+    await canvas.shroomParticleEntrance.play(source, { reverse: true, reducedMotion: true });
+    expect(border.geometry.attributes.portalOrigin).toBeUndefined();
+    expect(points.geometry.attributes.position.array).toEqual(previousPositions);
+    expect(border.material).toBe(originalMaterial);
+    dispose(); edge.dispose();
+  });
   it('使用真实对象变换和相机投影，而非模型包围盒估算', () => {
     const { points, camera, rect } = fixture();
     points.position.x = 2;

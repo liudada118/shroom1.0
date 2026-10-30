@@ -66,6 +66,25 @@ describe('门户回放弹窗', () => {
     expect(onDownload.mock.calls[0][0]).not.toBe(downloadValues);
   });
 
+  it('时间戳记录只显示日期，回放、下载和删除仍传原始 ID', () => {
+    const id = `${new Date(2026, 9, 27, 17, 42, 7, 651).getTime()}.0`;
+    const onPlay = vi.fn();
+    const onDownload = vi.fn();
+    const onDelete = vi.fn();
+    const { html, elements } = renderDialog({
+      records: [{ value: id, label: id }], playbackValue: id, downloadValues: [id],
+      onPlay, onDownload, onDelete,
+    });
+    expect(html).toContain('2026-10-27 17:42:07');
+    expect(html).not.toContain(id);
+    elements.find((element) => element.props.onClick?.name === 'playSelected').props.onClick();
+    elements.find((element) => element.props.onClick?.name === 'downloadSelected').props.onClick();
+    elements.find((element) => element.props.className === 'portal-playback-delete').props.onClick();
+    expect(onPlay).toHaveBeenCalledWith(id);
+    expect(onDownload).toHaveBeenCalledWith([id]);
+    expect(onDelete).toHaveBeenCalledWith(id);
+  });
+
   it.each([
     { records: [] },
     { playbackValue: 'deleted', downloadValues: ['deleted'] },

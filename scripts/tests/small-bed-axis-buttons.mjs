@@ -112,6 +112,14 @@ function checkRestored(state, initial, label) {
   }
   checkTopView(state, label);
 }
+
+/** 比较恢复后的实际GPU投影与镜头，保存的非俯视姿态同样必须原样恢复。 */
+function checkPersisted(state, saved, label) {
+  check(maximumDifference(state.modelViewMatrix, saved.modelViewMatrix) < .00001, `${label}: GPU transform not persisted`);
+  for (const key of ['center', 'position', 'quaternion', 'cameraPosition', 'cameraQuaternion', 'cameraUp', 'target']) {
+    check(maximumDifference(state[key], saved[key]) < .0000001, `${label}: changed ${key}`);
+  }
+}
 try {
   await server.listen();
   browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -212,6 +220,50 @@ try {
     await page.waitForFunction(() => window.__smallBedAxisButtons?.snapshot().available && window.__smallBedAxisGpu.draws > 0);
     await renderFrames(page, 30);
     checkRestored(await snapshot(page), initial, `${scenario}: refreshed mount`);
+    if (!baselineSources) {
+      const entry = `http://127.0.0.1:${address.port}/__small-bed-axis-buttons?layout=${layout}&persist=1`;
+      await page.goto(entry);
+      await page.waitForFunction(() => window.__smallBedAxisButtons?.snapshot().available && window.__smallBedAxisGpu.draws > 0);
+      await page.getByRole('button', { name: 'X 轴 +30°', exact: true }).waitFor();
+      await renderFrames(page, 30);
+      const defaults = await snapshot(page);
+      await page.getByRole('button', { name: 'X 轴 +30°', exact: true }).click();
+      await page.getByRole('button', { name: '放大', exact: true }).click();
+      await page.getByRole('tab', { name: '数据处理', exact: true }).click();
+      await page.getByRole('button', { name: '水平翻转', exact: true }).click();
+      await page.getByRole('button', { name: '纵向翻转', exact: true }).click();
+      await renderFrames(page, 20);
+      const saved = await snapshot(page);
+      await page.waitForFunction(() => Object.keys(localStorage).filter(key => key.startsWith('shroom.workspaceView.v1:'))
+        .some(key => { const saved = JSON.parse(localStorage.getItem(key)); return saved.flipX && saved.flipY; }));
+      await page.evaluate(() => window.__smallBedAxisButtons.setOpen(false));
+      await page.reload();
+      await page.waitForFunction(() => window.__smallBedAxisButtons?.snapshot().available && window.__smallBedAxisGpu.draws > 0);
+      await renderFrames(page, 35);
+      checkPersisted(await snapshot(page), saved, `${scenario}: persisted after reload`);
+      await page.goto(`${entry}&system=isolated-copy`);
+      await page.waitForFunction(() => window.__smallBedAxisButtons?.snapshot().available && window.__smallBedAxisGpu.draws > 0);
+      await renderFrames(page, 35);
+      checkRestored(await snapshot(page), defaults, `${scenario}: another system has its own defaults`);
+      await page.goto(entry);
+      await page.waitForFunction(() => window.__smallBedAxisButtons?.snapshot().available && window.__smallBedAxisGpu.draws > 0);
+      await renderFrames(page, 35);
+      checkPersisted(await snapshot(page), saved, `${scenario}: original system remembered`);
+      await page.evaluate(() => { window.__smallBedAxisButtons.setVisible(false); });
+      await page.waitForFunction(() => !window.__smallBedAxisButtons.snapshot().available);
+      await page.evaluate(() => window.__smallBedAxisButtons.setVisible(true));
+      await page.waitForFunction(() => window.__smallBedAxisButtons.snapshot().available);
+      await renderFrames(page, 35);
+      checkPersisted(await snapshot(page), saved, `${scenario}: persisted after reentry`);
+      await page.screenshot({ path: join(artifacts, `${scenario}-persisted.png`) });
+      await page.getByRole('button', { name: '恢复视角', exact: true }).click();
+      await renderFrames(page, 20);
+      checkRestored(await snapshot(page), defaults, `${scenario}: reset retains system defaults`);
+      await page.reload();
+      await page.waitForFunction(() => window.__smallBedAxisButtons?.snapshot().available && window.__smallBedAxisGpu.draws > 0);
+      await renderFrames(page, 35);
+      checkRestored(await snapshot(page), defaults, `${scenario}: reset is persistent`);
+    }
     check(errors.length === 0, `${scenario}: browser errors ${errors.join('; ')}`);
     await page.close();
   }

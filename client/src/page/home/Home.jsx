@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
-import { readTuningConfig, hasExplicitTuningValue } from '../../services/tuningConfig';
+import { readTuningConfig, hasExplicitTuningValue, normalizeDisplayTuning } from '../../services/tuningConfig';
 import { readLicenseAccess, isHistoryOnlyLicense, canUseLicenseCapability, getLicenseExpiryTimestamp } from '../../services/licenseAccess';
 import { readCollectionSummary } from '../../services/collectionStatus';
 import { finishCollectionBeforeExit } from '../../services/collectionExit';
@@ -837,9 +837,9 @@ const getConfig = ({ sensorType, systemId, mode }) => {
     for (const field of Object.keys(mergedConfig)) {
       if (hasExplicitTuningValue(cacheOptions, field)) normalized[field] = mergedConfig[field];
     }
-    return normalized;
+    return normalizeDisplayTuning(normalized);
   }
-  return mergedConfig
+  return normalizeDisplayTuning(mergedConfig)
 }
 
 /**
@@ -1050,6 +1050,8 @@ class Home extends React.Component {
       systemId: localStorage.getItem('file') || initialMatrixName,
       valueg1: initialMatrixConfig.valueg1,
       valuej1: initialMatrixConfig.valuej1,
+      colorSliderMax: initialMatrixConfig.colorSliderMax,
+      edgeBuffer1: initialMatrixConfig.edgeBuffer1,
       valuel1: initialMatrixConfig.valuel1,
       valuef1: initialMatrixConfig.valuef1,
       value1: initialMatrixConfig.value1,
@@ -1208,13 +1210,18 @@ class Home extends React.Component {
   syncDisplayRendererConfig = () => {
     const usesSharedDefaults = displayRendererConfigMatrixArr.includes(this.state.matrixName)
       || (tactileGloveTypes.includes(this.state.matrixName) && this.state.numMatrixFlag === 'gloveTerrain');
-    const saved = readTuningConfig({ sensorType: this.state.matrixName, systemId: this.state.systemId,
-      legacyType: matrixNameToType(this.state.matrixName), mode: this.state.numMatrixFlag });
+    const saved = normalizeDisplayTuning(readTuningConfig({ sensorType: this.state.matrixName, systemId: this.state.systemId,
+      legacyType: matrixNameToType(this.state.matrixName), mode: this.state.numMatrixFlag }));
     const values = usesSharedDefaults ? this.state : saved;
     const rendererConfig = {};
     for (const [field, target] of Object.entries({ valueg1: 'valueg', valuej1: 'valuej', valuel1: 'valuel',
-      valuef1: 'valuef', value1: 'value', valuelInit1: 'valuelInit' })) {
+      valuef1: 'valuef', value1: 'value', valuelInit1: 'valuelInit', edgeBuffer1: 'edgeBuffer' })) {
       if (Number.isFinite(values[field])) rendererConfig[target] = values[field];
+    }
+    const tuningControls = this.com.current?.getTuningControls?.();
+    if (tuningControls?.showEdgeBuffer && !Number.isFinite(rendererConfig.edgeBuffer)
+      && Number.isFinite(tuningControls.edgeBufferDefault)) {
+      rendererConfig.edgeBuffer = tuningControls.edgeBufferDefault;
     }
     if (Object.keys(rendererConfig).length) {
       this.com.current?.sitValue?.(rendererConfig);
@@ -3808,6 +3815,7 @@ class Home extends React.Component {
       prevState.speedValue !== this.state.speedValue ||
       prevState.valueg1 !== this.state.valueg1 ||
       prevState.valuej1 !== this.state.valuej1 ||
+      prevState.edgeBuffer1 !== this.state.edgeBuffer1 ||
       prevState.valuel1 !== this.state.valuel1 ||
       prevState.valuef1 !== this.state.valuef1 ||
       prevState.value1 !== this.state.value1 ||
@@ -5390,6 +5398,8 @@ class Home extends React.Component {
             valuef1={this.state.valuef1}
             valuel1={this.state.valuel1}
             valuej1={this.state.valuej1}
+            colorSliderMax={this.state.colorSliderMax}
+            edgeBuffer1={this.state.edgeBuffer1}
             sizeValue={this.state.sizeValue}
             speedValue={this.state.speedValue}
             valuelInit1={this.state.valuelInit1}

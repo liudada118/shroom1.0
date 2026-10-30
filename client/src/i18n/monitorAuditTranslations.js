@@ -1,6 +1,26 @@
 // Static interface copy only; system IDs, saved labels and sensor data stay unchanged.
 export default {
   "monitorUi": {
+    "colorSliderMax": {
+      "zh": "颜色调节上限",
+      "en": "Color slider maximum",
+      "ja": "色調整スライダーの上限"
+    },
+    "colorSliderMaxHint": {
+      "zh": "可设 5–65535，按回车或离开输入框保存。降低上限时，超出范围的颜色值会同步降低。",
+      "en": "Set 5–65535. Press Enter or leave the field to save. A lower limit also reduces any color value above it.",
+      "ja": "5～65535 で設定。Enter またはフォーカス移動で保存します。上限を下げると、それを超える色の値も下がります。"
+    },
+    "edgeBuffer": {
+      "zh": "边缘缓冲宽度",
+      "en": "Edge buffer width",
+      "ja": "エッジバッファの幅"
+    },
+    "edgeBufferHint": {
+      "zh": "0 关闭，1–16 为外围缓冲网格层数。缓冲区平缓降至零，仅影响点图显示。",
+      "en": "0 disables it; 1–16 adds outer grid layers that smoothly fall to zero. Affects the point view only.",
+      "ja": "0 は無効、1～16 は外周のグリッド層数です。外周は滑らかにゼロへ下がり、点群表示のみに適用されます。"
+    },
     "collectionWaitingForData": {
       "zh": "尚未收到有效传感器数据，请等待数据后再开始采集。",
       "en": "No valid sensor data has arrived yet. Wait for data before starting recording.",

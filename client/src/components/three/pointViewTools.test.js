@@ -138,4 +138,26 @@ describe('旧点图视角中心', () => {
     tools.reset();
     expect(object.matrixWorld.elements).toEqual(initial.elements);
   });
+  it('保存旋转镜像后的底面补偿，重新挂载恢复同一中心和镜头且默认复位不受污染', async () => {
+    const localCenter = new Vector3(-50, 0, -50), first = fixture(localCenter);
+    const received = [];
+    first.tools.subscribe((value) => received.push(value));
+    const center = first.plane.localToWorld(localCenter.clone());
+    first.tools.rotate('x'); first.tools.flip('y'); first.tools.rotate('x', -1); first.tools.top(); first.tools.zoom(1);
+    await Promise.resolve();
+    expect(received).toHaveLength(1);
+    const saved = received[0]; expect(saved).toEqual(first.tools.getSnapshot());
+    expect(first.plane.localToWorld(localCenter.clone()).distanceTo(center)).toBeLessThan(1e-10);
+    const second = fixture(localCenter), initialTarget = second.controls.target0.clone();
+    expect(second.tools.restoreSnapshot(saved)).toBe(true);
+    expect(second.plane.localToWorld(localCenter.clone()).distanceTo(center)).toBeLessThan(1e-10);
+    expect(second.camera.position.toArray()).toEqual(first.camera.position.toArray());
+    expect(second.controls.target.toArray()).toEqual(first.controls.target.toArray());
+    expect(second.controls.target0.toArray()).toEqual(initialTarget.toArray());
+    expect(second.object.matrixWorld.elements).toEqual(first.object.matrixWorld.elements);
+    second.tools.reset();
+    expect(second.controls.target.toArray()).toEqual(initialTarget.toArray());
+    expect(second.camera.position.toArray()).toEqual([0, 200, 300]);
+    expect(second.tools.getState()).toMatchObject({ flipX: false, flipY: false });
+  });
 });

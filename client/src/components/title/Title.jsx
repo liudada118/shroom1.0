@@ -4,6 +4,8 @@ import { PortalSessionBar, PortalQuickTools, PortalDisplayPanel } from '../../pa
 import PortalControlDialog, { PORTAL_CONTROL_THEME } from '../../page/licensePortal/PortalControlDialog';
 import PortalPlaybackDialog from '../../page/licensePortal/PortalPlaybackDialog';
 import PortalWorkspaceTools from '../../page/licensePortal/PortalWorkspaceTools';
+import WorkspaceViewPersistence from './WorkspaceViewPersistence';
+import TuningNumberInput from './TuningNumberInput';
 import PortalRendererControls from '../../page/licensePortal/PortalRendererControls';
 import { createPortalCsvBatch } from './portalCsvBatch';
 import { capturePortalOperation, executePortalLegacyControl } from './portalOperationGuard';
@@ -32,7 +34,7 @@ import { getDisplayDefinition, registerRuntimeDisplayDefinition } from '../../di
 import { syncNativeSystemTemplates } from '../../displays/nativeSystemTemplates';
 import { buildAccessibleSensorOptions } from '../../services/sensorStatus';
 import { resolveNativeSystemType } from '../../displays/nativeSystemTemplates';
-import { readTuningConfig, writeTuningConfig, hasExplicitTuningValue } from '../../services/tuningConfig';
+import { readTuningConfig, writeTuningConfig, hasExplicitTuningValue, normalizeDisplayTuning, resolveColorSliderMax, COLOR_SLIDER_LIMIT } from '../../services/tuningConfig';
 import { getBuiltinSystemOptions } from '../../services/displaySystemOptions';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
@@ -176,7 +178,6 @@ const getColorSliderMax = (matrixName) => {
   if (isHumanBodyMatrixTitle(matrixName)) return HUMAN_BODY_COLOR_SLIDER_MAX
   return 1000
 }
-const getColorSliderStep = () => 10
 const normalizeHumanBodySizeValue = (sizeValue) => {
   const nextValue = Number(sizeValue);
   if (!Number.isFinite(nextValue)) {
@@ -255,7 +256,7 @@ const getConfig = ({ sensorType, systemId, mode }) => {
   ) {
     mergedConfig.valuelInit1 = SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER
   }
-  return mergedConfig
+  return normalizeDisplayTuning(mergedConfig)
 }
 
 /**
@@ -1677,6 +1678,8 @@ class Title extends React.Component {
     let showConsis = false;   // Data consistency
     let showInit = false;     // Initial value
     let showHumanTransform = false; // Human model transform
+    const showEdgeBuffer = dynamicControls?.showEdgeBuffer === true;
+    const colorSliderMax = resolveColorSliderMax(this.props.colorSliderMax, this.props.valuej1, getColorSliderMax(matrixName));
 
     if (dynamicControls) {
       ({ showGuass, showSize, showSpeed, showColor, showFilter, showHeight, showConsis, showInit } = dynamicControls);
@@ -1863,11 +1866,13 @@ class Title extends React.Component {
 
           {/* Color */}
           {showColor && (
+            <>
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('color')}</div>
               <Slider
                 usageFeature="tuning_color_range"
-                min={5} max={getColorSliderMax(matrixName)} step={getColorSliderStep(matrixName)}
+                ariaLabelForHandle={t('color')}
+                min={COLOR_SLIDER_LIMIT.min} max={colorSliderMax} step={1}
                 value={this.props.valuej1}
                 onChange={(value) => {
                   localStorage.setItem("carValuej", value);
@@ -1878,6 +1883,43 @@ class Title extends React.Component {
                 }}
                 style={{ width: '200px' }}
               />
+            </div>
+            <div className="tuning-range-setting">
+              <div className="tuning-range-row">
+                <span>{t('monitorUi.colorSliderMax')}</span>
+                <TuningNumberInput key={`${this.props.systemId}:${mode}:color-max`}
+                  label={t('monitorUi.colorSliderMax')} value={colorSliderMax}
+                  min={COLOR_SLIDER_LIMIT.min} max={COLOR_SLIDER_LIMIT.max}
+                  onCommit={value => {
+                    const color = Math.min(value, this.props.valuej1 ?? value);
+                    this.props.changeStateData({ colorSliderMax: value, valuej1: color });
+                    changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: 'colorSliderMax', value, mode: cacheMode });
+                    changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: 'valuej1', value: color, mode: cacheMode });
+                    pushSitBack({ valuej: color });
+                    pushChangeColor({ max: color });
+                    trackUsage('analysis_tool_used', { featureId: 'tuning_color_limit', action: 'adjust', result: 'success' });
+                  }} />
+              </div>
+              <div className="tuning-range-hint">{t('monitorUi.colorSliderMaxHint')}</div>
+            </div>
+            </>
+          )}
+
+          {showEdgeBuffer && (
+            <div className="tuning-range-setting">
+              <div className="tuning-range-row">
+                <span>{t('monitorUi.edgeBuffer')}</span>
+                <span>{this.props.edgeBuffer1 ?? dynamicControls.edgeBufferDefault ?? 0}</span>
+              </div>
+              <Slider usageFeature="tuning_edge_buffer" ariaLabelForHandle={t('monitorUi.edgeBuffer')}
+                min={0} max={16} step={1}
+                value={this.props.edgeBuffer1 ?? dynamicControls.edgeBufferDefault ?? 0}
+                onChange={value => {
+                  this.props.changeStateData({ edgeBuffer1: value });
+                  changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: 'edgeBuffer1', value, mode: cacheMode });
+                  pushSitBack({ edgeBuffer: value });
+                }} />
+              <div className="tuning-range-hint">{t('monitorUi.edgeBufferHint')}</div>
             </div>
           )}
 
@@ -2969,6 +3011,8 @@ class Title extends React.Component {
     </>;
 
     return <div className={`title${this.props.portalEmbedded ? ' portal-session-title' : ''}`}>
+      <WorkspaceViewPersistence rendererRef={this.props.com} systemId={this.props.systemId} sensorType={this.props.matrixName}
+        mode={this.props.numMatrixFlag} history={this.props.history} />
       {this.props.portalEmbedded ? <PortalSessionBar
         mode={this.props.history}
         busy={this.state.portalBusy || this.state.csvDownloadStage === 'exporting'}

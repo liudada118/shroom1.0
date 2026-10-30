@@ -154,6 +154,7 @@ export function registerBuiltinRenderers() {
         'reset',
         'getViewTools',
         'getSelectionTools',
+        'getTuningControls',
       ],
       normalizeParams: normalizePointGridParams,
       // matCol 与 carCol 两条。它们 953 行代码的净差异只有两个数字

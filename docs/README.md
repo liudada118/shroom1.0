@@ -23,6 +23,9 @@
 5. [Agent 聊天同步接口](agent-chat-sync-api.md)：客户首次配置、升级保留数据、上传内容、持久队列与服务端接收契约。
    [服务商与模型目录](agent-model-catalog-api.md)：动态下拉选项、离线缓存及服务端热配置；首次需更新兼容客户端。
 6. [电脑授权、网页缓存与使用统计](desktop-distribution-services.md)：设备上限、离线签名凭证、独立网页发布、上报开关与部署验收。
+7. [产品埋点说明与补齐规范](shroom-usage-tracking-spec.md)：现有事件字典、字段与指标口径、已确认缺口、补齐优先级和验收清单；目标设计与当前实现分别标记。
+8. [错误上报现状与补齐规范](shroom-error-reporting-spec.md)：页面、启动和进程错误的当前覆盖、缺口优先级、诊断补齐方案与故障注入验收；区分本地日志、业务失败、持久化与服务端接收。
+9. [错误与埋点实施记录（2026-10-29）](telemetry-implementation-20261029.md)：启动诊断、采集终态/修订、投递质量、v2 接收端的已实现范围、容量边界和发布顺序；完整有效区间和客户试点仍待后续验收。
 
 代码定位和测试选择用 [ARCHITECTURE_INDEX.md](../ARCHITECTURE_INDEX.md)；追溯旧决策才查
 [ARCHITECTURE.md](../ARCHITECTURE.md)。后者是累积台账，不再作为从头学习当前架构的入口。

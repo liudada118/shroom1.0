@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../onestep/heatmap', () => ({ bthClickHandle: vi.fn() }));
 vi.mock('../../i18n', () => ({ getLanguageLocale: () => 'zh-CN' }));
 import TranslatedTitle from './Title';
+import WorkspaceViewPersistence from './WorkspaceViewPersistence';
+import TuningNumberInput from './TuningNumberInput';
 const Title = TranslatedTitle.render({}, null).type.WrappedComponent;
 
 /** 遍历真实标题栏及插槽，调用实际滑块与模式选择事件。 */
@@ -58,5 +60,51 @@ describe('真实调节滑块的持久化往返', () => {
       entries(entered.render()).find(node => node.type === Select && node.props['aria-label'] === 'monitorUi.displayMode').props.onChange('normal');
       expect(entered.props.changeStateData.mock.lastCall[0].valuelInit1).toBe(expected);
     }
+  });
+
+  it('工具箱关闭或纯点图状态仍挂载本系统本模式的视角恢复', () => {
+    const title = createTitle('smallBedNoAlg', 'customer-bed');
+    title.props.portalSceneOnly = true;
+    title.props.numMatrixFlag = 'normal';
+    const persistence = entries(title.render()).find(node => node.type === WorkspaceViewPersistence);
+    expect(persistence.props).toMatchObject({ systemId: 'customer-bed', sensorType: 'smallBedNoAlg', mode: 'normal', history: 'now' });
+    expect(persistence.props.rendererRef).toBe(title.props.com);
+  });
+
+  it('颜色上限扩大可选范围，降低时同步渲染值，重新进入仍恢复且不串模式', () => {
+    const title = createTitle('smallBedNoAlg');
+    title.props.valuej1 = 1205;
+    let controls = entries(title.renderSettingSliders(title.props.t));
+    expect(controls.find(node => node.props.usageFeature === 'tuning_color_range').props.max).toBe(1205);
+    controls.find(node => node.type === TuningNumberInput).props.onCommit(6000);
+    expect(title.props.changeStateData.mock.lastCall[0]).toEqual({ colorSliderMax: 6000, valuej1: 1205 });
+    Object.assign(title.props, title.props.changeStateData.mock.lastCall[0]);
+    controls = entries(title.renderSettingSliders(title.props.t));
+    expect(controls.find(node => node.props.usageFeature === 'tuning_color_range').props.max).toBe(6000);
+    controls.find(node => node.type === TuningNumberInput).props.onCommit(500);
+    expect(title.props.com.current.sitValue).toHaveBeenLastCalledWith({ valuej: 500 });
+    expect(title.props.com.current.changeColor).toHaveBeenLastCalledWith({ max: 500 });
+    const entered = createTitle('smallBedNoAlg');
+    const display = entries(entered.render()).find(node => node.type === Select && node.props['aria-label'] === 'monitorUi.displayMode');
+    display.props.onChange('normal');
+    expect(entered.props.changeStateData.mock.lastCall[0]).toMatchObject({ colorSliderMax: 500, valuej1: 500 });
+    display.props.onChange('numoriginal');
+    expect(entered.props.changeStateData.mock.lastCall[0].colorSliderMax).toBeUndefined();
+  });
+
+  it('只有支持边框的渲染器显示缓冲滑块，0会传到渲染器且能恢复', () => {
+    const title = createTitle('smallBedNoAlg', 'bed-buffer-copy');
+    expect(entries(title.renderSettingSliders(title.props.t)).some(node => node.props.usageFeature === 'tuning_edge_buffer')).toBe(false);
+    const controls = { showColor: true, showEdgeBuffer: true, edgeBufferDefault: 2 };
+    const slider = entries(title.renderSettingSliders(title.props.t, controls)).find(node => node.props.usageFeature === 'tuning_edge_buffer');
+    expect(slider.props.value).toBe(2);
+    slider.props.onChange(0);
+    expect(title.props.com.current.sitValue).toHaveBeenLastCalledWith({ edgeBuffer: 0 });
+    const entered = createTitle('smallBedNoAlg', 'bed-buffer-copy');
+    const display = entries(entered.render()).find(node => node.type === Select && node.props['aria-label'] === 'monitorUi.displayMode');
+    display.props.onChange('normal');
+    expect(entered.props.changeStateData.mock.lastCall[0].edgeBuffer1).toBe(0);
+    display.props.onChange('numoriginal');
+    expect(entered.props.changeStateData.mock.lastCall[0].edgeBuffer1).toBeUndefined();
   });
 });

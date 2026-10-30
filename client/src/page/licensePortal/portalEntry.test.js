@@ -17,6 +17,125 @@ async function flush() { for (let i = 0; i < 8; i += 1) await Promise.resolve();
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe('首页选择系统事务', () => {
+  it('列表验证一次后进入及返回重进不再请求授权，仍逐次切换系统', async () => {
+    const test = setup();
+    test.entry.validate({ key: 'same-key', connected: true }); await flush();
+    test.onPhase.mockClear();
+    for (let index = 0; index < 2; index++) {
+      test.entry.begin({ system, key: ' same-key ', connected: true }); await flush();
+    }
+    expect(test.activate).toHaveBeenCalledTimes(1);
+    expect(test.switchSystem).toHaveBeenCalledTimes(2);
+    expect(test.onEntered).toHaveBeenCalledTimes(2);
+    expect(test.onValidated).toHaveBeenCalledTimes(1);
+    expect(test.onPhase.mock.calls.flat()).not.toContain('validating');
+  });
+
+  it('宿主启动快照可直接进入，普通成功广播不能冒充绑定身份的快照', async () => {
+    const test = setup();
+    expect(test.entry.restore({ key: 'saved-key', payload: valid(['hand0205']) })).toBe(true);
+    test.entry.receive(valid(['hand0205']));
+    test.entry.begin({ system, key: 'saved-key', connected: true }); await flush();
+    expect(test.activate).not.toHaveBeenCalled();
+    expect(test.switchSystem).toHaveBeenCalledWith('hand0205');
+    const unbound = setup();
+    unbound.entry.receive(valid());
+    unbound.entry.begin({ system, key: 'unverified-key', connected: true }); await flush();
+    expect(unbound.activate).toHaveBeenCalledTimes(1);
+    expect(unbound.entry.restore({ key: '', payload: valid() })).toBe(false);
+    expect(unbound.entry.restore({ key: 'bad', payload: { valid: false } })).toBe(false);
+  });
+
+  it('复用同一密钥时仍拒绝范围外系统，不能把前次成功当作全部授权', async () => {
+    const test = setup({ activate: vi.fn(async () => activationAck(valid(['wholeChair']))) });
+    test.entry.validate({ key: 'chair-key', connected: true }); await flush();
+    test.entry.begin({ system, key: 'chair-key', connected: true }); await flush();
+    expect(test.activate).toHaveBeenCalledTimes(1);
+    expect(test.switchSystem).not.toHaveBeenCalled();
+    expect(test.onError).toHaveBeenLastCalledWith('当前密钥未授权此系统，请选择可用系统或更换密钥');
+  });
+
+  it('更换密钥不能复用旧范围，显式验证仍会刷新同一密钥', async () => {
+    const test = setup({ activate: vi.fn().mockResolvedValueOnce(activationAck())
+      .mockResolvedValue(activationAck(valid(['wholeChair']))) });
+    test.entry.validate({ key: 'old-key', connected: true }); await flush();
+    test.entry.begin({ system, key: 'new-key', connected: true }); await flush();
+    expect(test.activate.mock.calls).toEqual([['old-key'], ['new-key']]);
+    expect(test.switchSystem).not.toHaveBeenCalled();
+    test.entry.validate({ key: 'new-key', connected: true }); await flush();
+    expect(test.activate).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['invalidate', 'disconnect'])('改密钥或断线后的 %s 不保留可复用结果', async mode => {
+    const test = setup();
+    test.entry.validate({ key: 'same-key', connected: true }); await flush();
+    if (mode === 'invalidate') test.entry.invalidate();
+    else test.entry.begin({ system, key: 'same-key', connected: false });
+    test.entry.begin({ system, key: 'same-key', connected: true }); await flush();
+    expect(test.activate).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([{ licenseLocked: true }, { licenseError: '撤销' }, { valid: false },
+    { licenseKey: 'other-key' }, { selectFlag: ['wholeChair'] }])('闲置时收到身份或权限变化不复用旧结果：%j', async message => {
+    const test = setup();
+    test.entry.validate({ key: 'same-key', connected: true }); await flush();
+    test.entry.receive(message);
+    test.entry.begin({ system, key: 'same-key', connected: true }); await flush();
+    expect(test.activate).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['license', 'lease'])('%s 到期后不继续复用过期结果', async deadline => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-30T08:00:00Z'));
+    const licenseAccess = { schemaVersion: 1, state: 'active', canAcquire: true, canReadHistory: true,
+      canAnalyzeHistory: true, canExport: true, canConfigure: true, canStop: true,
+      expiresAt: Date.now() + 1000, licenseExpiresAt: Date.now() + 60000 };
+    const payload = deadline === 'lease' ? { ...valid(), licenseAccess } : { ...valid(), date: Date.now() + 1000 };
+    const test = setup();
+    test.entry.restore({ key: 'timed-key', payload });
+    await vi.advanceTimersByTimeAsync(1001);
+    test.entry.begin({ system, key: 'timed-key', connected: true }); await flush();
+    expect(test.activate).toHaveBeenCalledTimes(1);
+  });
+
+  it('只读历史快照重复广播后仍能复用，不能恢复实时采集能力', async () => {
+    const licenseAccess = { schemaVersion: 1, state: 'expired', canAcquire: false, canReadHistory: true,
+      canAnalyzeHistory: true, canExport: false, canConfigure: false, canStop: true };
+    const payload = { ...valid(['hand0205']), date: Date.now() - 1000, valid: false, licenseAccess };
+    const test = setup();
+    expect(test.entry.restore({ key: 'history-key', payload })).toBe(true);
+    test.entry.receive(payload);
+    test.entry.begin({ system, key: 'history-key', connected: true }); await flush();
+    expect(test.activate).not.toHaveBeenCalled();
+    expect(test.onEntered).toHaveBeenCalledWith(system);
+    expect(payload.licenseAccess.canAcquire).toBe(false);
+  });
+
+  it('复用授权仍每次读取公司目录，已移除系统不能再次进入', async () => {
+    const managed = { value: 'company-sensor', systemId: 'company-system', managed: true, source: 'manifest' };
+    const test = setup({ activate: vi.fn(async () => activationAck(valid(['company-system']))),
+      getManagedIds: vi.fn().mockResolvedValueOnce(['company-system']).mockResolvedValueOnce([]) });
+    test.entry.validate({ key: 'company-key', connected: true }); await flush();
+    test.entry.begin({ system: managed, key: 'company-key', connected: true }); await flush();
+    test.entry.begin({ system: managed, key: 'company-key', connected: true }); await flush();
+    expect(test.activate).toHaveBeenCalledTimes(1);
+    expect(test.getManagedIds).toHaveBeenCalledTimes(2);
+    expect(test.switchSystem).toHaveBeenCalledTimes(1);
+    expect(test.onError).toHaveBeenLastCalledWith('当前密钥未授权此系统，请选择可用系统或更换密钥');
+  });
+
+  it('复用结果的切换仍等待宿主确认，断线后迟到成功不能进入', async () => {
+    let finishSwitch;
+    const test = setup({ switchSystem: vi.fn(() => new Promise(resolve => { finishSwitch = resolve; })) });
+    test.entry.restore({ key: 'saved-key', payload: valid() });
+    test.entry.begin({ system, key: 'saved-key', connected: true }); await flush();
+    expect(test.onEntered).not.toHaveBeenCalled();
+    test.entry.invalidate();
+    finishSwitch({ ok: true }); await flush();
+    expect(test.onEntered).not.toHaveBeenCalled();
+    expect(test.activate).not.toHaveBeenCalled();
+  });
+
   it('正常到期只读合同仍可进入本轮授权的历史系统', async () => {
     const licenseAccess = { schemaVersion: 1, state: 'expired', canAcquire: false, canReadHistory: true,
       canAnalyzeHistory: true, canExport: false, canConfigure: false, canStop: true };

@@ -76,6 +76,7 @@ import { buildPointGridBasePositions, copyPointGridFrame } from '../core/pipelin
 import { preparePointGridValues, updatePointGridTuning } from '../core/tuning.js';
 import { createWorkspaceViewTools } from '../../shared/three/workspaceViewTools.js';
 import { createPointGridSelection } from '../../shared/gridSelection.js';
+import { createEdgeBufferPoints } from './edgeBufferPoints.js';
 // 打包器把它变成一个真实存在的 URL；理由见文件头第 1 条。
 // 2026-08-07 从 `./circle.png` 挪到 `../../shared/three/`：`handPoints` 渲染器也要这张图，
 // 放在两个渲染器目录之一会让另一个跨目录引资源。它和 `SelectionHelper` /
@@ -129,6 +130,8 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
   if (stateRef.current === null) {
     stateRef.current = {
       tuning: createTuningState(),
+      edgeBufferDefault: sit.order,
+      hasPhysicalPoints: Boolean(config.points?.length),
       rawSitFrame: null,
       selection: null,
       viewTools: null,
@@ -193,6 +196,9 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
     let resizeObserver = null;
 
     state.disposed = false;
+    state.edgeBufferDefault = sit.order;
+    state.hasPhysicalPoints = Boolean(config.points?.length);
+    if (state.tuning.edgeBuffer1 == null) state.tuning.edgeBuffer1 = sit.order;
     state.bigArrg = new Array(gridTotal).fill(1);
     state.smoothBig = new Array(gridTotal).fill(1);
     state.ndata1 = new Array(sit.num1 * sit.num2).fill(0);
@@ -376,6 +382,11 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
       });
 
       state.particles = new THREE.Points(state.sitGeometry, state.material);
+      if (!state.hasPhysicalPoints) state.edgeBufferPoints = createEdgeBufferPoints({ points: state.particles,
+        rows: AMOUNTX, columns: AMOUNTY, padding: sit.order,
+        positionAt: (row, col) => config.transposeAxes
+          ? [col * SEPARATION - (AMOUNTY - 1) * SEPARATION / 2, row * SEPARATION - (AMOUNTX - 1) * SEPARATION / 2]
+          : [row * SEPARATION - (AMOUNTX - 1) * SEPARATION / 2, col * SEPARATION - (AMOUNTY - 1) * SEPARATION / 2] });
       state.particles.scale.set(0.0062, 0.0062, 0.0062);
       state.particles.rotation.x = Math.PI / 3;
       state.group.add(state.particles);
@@ -476,6 +487,7 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
       );
       if (t.valueg1 > 0) gaussBlur_1(padded, state.bigArrg, AMOUNTY, AMOUNTX, t.valueg1);
       else for (let index = 0; index < gridTotal; index++) state.bigArrg[index] = padded[index];
+      state.edgeBufferPoints?.update(padded, AMOUNTY, AMOUNTX, t.valueg1, t.edgeBuffer1);
 
       const { positions, colors, smoothBig, bigArrg, sitIndexArr } = state;
       const hasSelection = sitIndexArr && sitIndexArr.length > 0
@@ -486,9 +498,10 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
       let dataArr = [];
       for (let ix = 0; ix < AMOUNTX; ix += 1) {
         for (let iy = 0; iy < AMOUNTY; iy += 1) {
-          const value = bigArrg[l] * 10;
+          const value = (state.edgeBufferPoints?.sample(l, bigArrg[l]) ?? bigArrg[l]) * 10;
           const previous = Number.isFinite(smoothBig[l]) ? smoothBig[l] : 0;
-          smoothBig[l] = previous + (value - previous + 0.5) / t.valuel1;
+          const buffered = state.edgeBufferPoints && t.edgeBuffer1 > 0;
+          smoothBig[l] = buffered && value === 0 ? 0 : previous + (value - previous + (buffered ? 0 : 0.5)) / t.valuel1;
 
           positions[k] = basePositions[k];
           positions[k + 1] = smoothBig[l] * t.value1;
@@ -518,6 +531,7 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
         }
       }
 
+      state.edgeBufferPoints?.render({ height: t.value1, smoothedValues: smoothBig, color: (value) => jet(0, t.valuej1, value) });
       if (!hasSelection) dataArr = bigArrg;
 
       state.timeS += clock.getDelta();
@@ -646,6 +660,7 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
 
     return () => {
       state.disposed = true;
+      state.edgeBufferPoints?.dispose(); state.edgeBufferPoints = null;
       state.selection?.dispose(); state.selection = null;
       state.viewTools?.dispose(); state.viewTools = null;
       cancelAnimationFrame(state.animationRequestId);
@@ -707,6 +722,9 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
     },
     getViewTools: () => stateRef.current.viewTools,
     getSelectionTools: () => stateRef.current.selection,
+    /** 物理点位布局不套用矩形外沿缓冲。 */
+    getTuningControls: () => ({ showGuass: true, showColor: true, showFilter: true, showHeight: true, showConsis: true, showInit: true,
+      showEdgeBuffer: !stateRef.current.hasPhysicalPoints, edgeBufferDefault: stateRef.current.edgeBufferDefault }),
     sitRenew: (...args) => stateRef.current.api?.sitRenew(...args),
     backData: (...args) => stateRef.current.api?.backData(...args),
     backValue: (...args) => stateRef.current.api?.backValue(...args),

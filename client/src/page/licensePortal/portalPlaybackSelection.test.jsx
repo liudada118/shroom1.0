@@ -31,6 +31,31 @@ describe('门户回放与批量下载的独立选择', () => {
     expect(normalizePlaybackRecords([{ value: 'fallback', label: {} }])[0].label).toBe('fallback');
   });
 
+  it('整数、小数毫秒及秒时间戳显示本地日期，保留操作 ID 和自定义记录名称', () => {
+    const milliseconds = new Date(2026, 9, 27, 17, 42, 7, 651).getTime();
+    const decimalId = `${milliseconds}.0`;
+    const actual = normalizePlaybackRecords([
+      { value: decimalId, label: decimalId },
+      { value: milliseconds },
+      { value: String(milliseconds / 1000) },
+      { value: 'named', label: '午间采集' },
+      { value: `${milliseconds + 1}.0`, label: '自定义采集名称' },
+      { value: '20261027' },
+      { value: '99999999999999999999' },
+    ]);
+    expect(actual.slice(0, 3).map((record) => record.label)).toEqual(Array(3).fill('2026-10-27 17:42:07'));
+    expect(actual[0]).toMatchObject({ value: decimalId, detail: '' });
+    expect(actual[1]).toMatchObject({ value: milliseconds, detail: '' });
+    expect(actual[0].key).not.toBe(actual[1].key);
+    expect(actual[3]).toMatchObject({ label: '午间采集', detail: 'named' });
+    expect(actual[4]).toMatchObject({ label: '自定义采集名称', detail: '' });
+    expect(actual.slice(5).map((record) => record.label)).toEqual(['20261027', '99999999999999999999']);
+    expect(normalizePlaybackRecords(actual)).toEqual(actual);
+    expect(filterPlaybackRecords(actual, '2026-10-27').map((record) => record.value))
+      .toEqual([decimalId, milliseconds, String(milliseconds / 1000)]);
+    expect(filterPlaybackRecords(actual, decimalId).map((record) => record.value)).toEqual([decimalId]);
+  });
+
   it('回放单选不会跟随下载多选变化', () => {
     const selected = togglePlaybackDownload(records, ['record-b'], 'record-c', true);
     expect(resolvePlaybackSelection(records, 'record-a', selected)).toEqual({

@@ -3,6 +3,15 @@ import { preparePointGridValues, updatePointGridTuning } from './tuning.js';
 import { runPointGridPipeline } from './pipeline.js';
 
 describe('点图调节与原帧隔离', () => {
+  it('边缘宽度按通道取整数并保留关闭值，不串用另一通道', () => {
+    const tuning = { edgeBuffer1: 2, edgeBuffer2: 4 };
+    updatePointGridTuning(tuning, { edgeBuffer: 0 });
+    expect(tuning).toEqual({ edgeBuffer1: 0, edgeBuffer2: 4 });
+    updatePointGridTuning(tuning, { edgeBuffer: 8.8 }, 2);
+    expect(tuning).toEqual({ edgeBuffer1: 0, edgeBuffer2: 9 });
+    updatePointGridTuning(tuning, { edgeBuffer: NaN });
+    expect(tuning.edgeBuffer1).toBe(0);
+  });
   it('高斯设为零会关闭空间滤波，不产生使画布消失的 NaN', () => {
     const raw = Object.freeze([1, 2, 3, 4, 5, 6]);
     const displayed = runPointGridPipeline(raw, { num1: 2, num2: 3, interp: 1, order: 0 }, 0);

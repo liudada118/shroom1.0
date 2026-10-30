@@ -11,6 +11,8 @@ import { SceneVisibilityContext } from '../../renderers/sceneVisibility';
 import { installParticleEntrance } from '../../renderers/particleEntrance';
 import { createWorkspaceViewTools } from '../../renderers/workspaceViewTools';
 import { createPointGridSelection } from '../../renderers/pointGridSelection';
+import { createEdgeBufferPoints } from '@shroom/frontend/renderers/pointGrid/react/edgeBufferPoints.js';
+import { normalizeEdgeBuffer } from '@shroom/frontend/renderers/pointGrid/core/edgeBuffer.js';
 import { TextureLoader } from "three";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateback } from "./threeUtil1";
 import {
@@ -150,6 +152,8 @@ const Canvas = React.forwardRef((props, refs) => {
 
   let scene, renderer;
   let disposeParticleEntrance;
+  let edgeBufferPoints;
+  const edgeBufferRef = useRef(sitOrder);
 
   let cube, chair, mixer, clips;
   const clock = new THREE.Clock();
@@ -345,6 +349,8 @@ const Canvas = React.forwardRef((props, refs) => {
     sitGeometry.setAttribute("scale", new THREE.BufferAttribute(scales, 1));
     sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     particles = new THREE.Points(sitGeometry, material);
+    edgeBufferPoints = createEdgeBufferPoints({ points: particles, rows: AMOUNTY, columns: AMOUNTX, padding: sitOrder,
+      positionAt: (row, col) => [col * SEPARATION - AMOUNTX * SEPARATION / 2, row * SEPARATION - AMOUNTY * SEPARATION / 2] });
 
     particles.scale.x = 0.0062;
     particles.scale.y = 0.0062;
@@ -471,13 +477,15 @@ const Canvas = React.forwardRef((props, refs) => {
       sitOrder
     );
 
-    gaussBlur_1(
+    if (valueg1 > 0) gaussBlur_1(
       bigArrs,
       bigArrg,
       sitnum2 * sitInterp + sitOrder * 2,
       sitnum1 * sitInterp + sitOrder * 2,
       valueg1
     );
+    else bigArrg = Array.from(bigArrs);
+    edgeBufferPoints?.update(bigArrs, AMOUNTX, AMOUNTY, valueg1, edgeBufferRef.current);
 
     let k = 0,
       l = 0;
@@ -488,9 +496,10 @@ const Canvas = React.forwardRef((props, refs) => {
     const useClassicColor = isClassicColormap(activeColormap);
     for (let iy = 0; iy < AMOUNTY; iy++) {
       for (let ix = 0; ix < AMOUNTX; ix++) {
-        const value = bigArrg[l] * 10;
+        const value = (edgeBufferPoints?.sample(l, bigArrg[l]) ?? bigArrg[l]) * 10;
         //柔化处理smooth
-        smoothBig[l] = pressureSuppressedRef.current ? 0 : smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
+        smoothBig[l] = pressureSuppressedRef.current || (edgeBufferRef.current > 0 && value === 0) ? 0
+          : smoothBig[l] + (value - smoothBig[l] + (edgeBufferRef.current > 0 ? 0 : 0.5)) / valuel1;
 
         positions[k] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2; // x
         positions[k + 1] = smoothBig[l] * value1; // y
@@ -529,6 +538,8 @@ const Canvas = React.forwardRef((props, refs) => {
     }
 
 
+    edgeBufferPoints?.render({ height: value1, smoothedValues: smoothBig, suppressed: pressureSuppressedRef.current,
+      color: (value) => sampleDataRgb(useClassicColor, activeColormap, value, valuej1) });
     if (!sitIndexArr || !sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
       dataArr = bigArrg
     }
@@ -671,7 +682,8 @@ const Canvas = React.forwardRef((props, refs) => {
   /** 更新手部显示参数，并用同一份末帧重新计算初始阈值。 */
   function sitValue(prop) {
     // console.log(prop)
-    const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
+    const { valuej, valueg, value, valuel, valuef, valuelInit, edgeBuffer } = prop;
+    if (edgeBuffer !== undefined) edgeBufferRef.current = normalizeEdgeBuffer(edgeBuffer, edgeBufferRef.current);
     if (valuej != null) valuej1 = valuej;
     if (valueg != null) valueg1 = valueg;
     if (value != null) value1 = value;
@@ -767,6 +779,8 @@ const Canvas = React.forwardRef((props, refs) => {
   useImperativeHandle(refs, () => ({
     getViewTools: () => workspaceViewRef.current,
     getSelectionTools: () => selectionRef.current,
+    /** 返回规则手部点图支持的边缘缓冲控件。 */
+    getTuningControls: () => ({ showGuass: true, showColor: true, showFilter: true, showHeight: true, showConsis: true, showInit: true, showEdgeBuffer: true, edgeBufferDefault: sitOrder }),
     backData: backData,
     sitData: sitData,
     changeDataFlag: changeDataFlag,
@@ -830,6 +844,8 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      disposeParticleEntrance?.();
+      edgeBufferPoints?.dispose();
       workspaceViewRef.current?.dispose();
       workspaceViewRef.current = null;
       selectionRef.current?.dispose();
@@ -846,7 +862,6 @@ const Canvas = React.forwardRef((props, refs) => {
       }
       brushManager.stopBrush();
       // 清理 renderer
-      disposeParticleEntrance?.();
       if (renderer) {
         renderer.dispose();
         renderer.forceContextLoss();

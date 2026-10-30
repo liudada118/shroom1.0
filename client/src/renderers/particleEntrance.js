@@ -101,6 +101,67 @@ diffuseColor.rgb = mix(vPortalColor, diffuseColor.rgb, portalProgress);
 diffuseColor.a *= mix(vPortalAlpha, 1.0, portalProgress);`);
 }
 
+/** 让外围点从相邻主图粒子一起展开，共用进度且不改变主图的规则矩阵配对。 */
+function attachParticleChildren(points, progress, origins) {
+  const participants = new Map();
+  const names = ['portalOrigin', 'portalColor', 'portalSize', 'portalAlpha'];
+  /** 调宽换几何后立即重绑；外围从透明开始，避免起点重叠造成边缘突然变亮。 */
+  const syncChild = (child) => {
+    const anchors = child.userData?.particleEntranceAnchors;
+    const geometry = child.geometry;
+    if (!child.visible || !child.material?.isPointsMaterial || !anchors?.length
+      || anchors.length !== geometry?.attributes?.position?.count) return;
+    let entry = participants.get(child);
+    if (!entry) {
+      const originalMaterial = child.material;
+      const material = originalMaterial.clone();
+      material.onBeforeCompile = shader => patchParticleShader(shader, progress);
+      material.customProgramCacheKey = () => 'shroom-particle-entrance-v1';
+      material.transparent = true;
+      entry = { originalMaterial, material, culling: child.frustumCulled, geometry: null };
+      participants.set(child, entry);
+      child.material = material;
+      child.frustumCulled = false;
+    }
+    if (entry.geometry !== geometry) {
+      for (const name of names) entry.geometry?.deleteAttribute(name);
+      entry.geometry = geometry;
+      for (const [name, size] of [['portalOrigin', 3], ['portalColor', 3], ['portalSize', 1], ['portalAlpha', 1]]) {
+        geometry.setAttribute(name, new THREE.BufferAttribute(new Float32Array(anchors.length * size), size));
+      }
+    }
+    const attributes = geometry.attributes;
+    for (let index = 0; index < anchors.length; index++) {
+      const anchor = Math.min(origins.sizes.length - 1, anchors[index]);
+      attributes.portalOrigin.array.set(origins.positions.subarray(anchor * 3, anchor * 3 + 3), index * 3);
+      attributes.portalColor.array.set(origins.colors.subarray(anchor * 3, anchor * 3 + 3), index * 3);
+      attributes.portalSize.array[index] = origins.sizes[anchor];
+    }
+    for (const name of names) attributes[name].needsUpdate = true;
+  };
+  /** 更新反向返回时移动的预览起点，也接入动画期间出现的新边框。 */
+  const sync = () => points.traverse(child => { if (child !== points) syncChild(child); });
+  const binding = { syncChild };
+  points.userData.particleEntrance = binding;
+  sync();
+  return {
+    sync,
+    /** 完成、取消和卸载恢复所有参与点图，原始共享材质只归主渲染器管理。 */
+    dispose() {
+      if (points.userData.particleEntrance === binding) delete points.userData.particleEntrance;
+      for (const [child, entry] of participants) {
+        // Three 只在 dispose 时释放仍登记的 GPU 属性；JS 主点位保留供下帧重新上传。
+        entry.geometry?.dispose();
+        for (const name of names) entry.geometry?.deleteAttribute(name);
+        child.material = entry.originalMaterial;
+        child.frustumCulled = entry.culling;
+        entry.material.dispose();
+      }
+      participants.clear();
+    },
+  };
+}
+
 /** 给原生点图安装临时形变入口；独立使用该渲染器时不改变材质、相机或渲染结果。 */
 export function installParticleEntrance(renderer, scene, camera, points, grid) {
   const canvas = renderer.domElement;
@@ -130,10 +191,11 @@ export function installParticleEntrance(renderer, scene, camera, points, grid) {
       points.frustumCulled = false;
       const attributes = { portalOrigin: [origins.positions, 3], portalColor: [origins.colors, 3], portalSize: [origins.sizes, 1], portalAlpha: [origins.opacity, 1] };
       for (const [name, [array, size]] of Object.entries(attributes)) geometry.setAttribute(name, new THREE.BufferAttribute(array, size));
+      const attached = attachParticleChildren(points, progress, origins);
       const clearAlpha = renderer.getClearAlpha();
       const decorations = [];
       scene.traverse((object) => {
-        if (object !== points && object.material) {
+        if (object !== points && !object.userData?.particleEntranceAnchors && object.material) {
           const materials = Array.isArray(object.material) ? object.material : [object.material];
           for (const item of materials) decorations.push({ material: item, opacity: item.opacity, transparent: item.transparent });
         }
@@ -145,6 +207,7 @@ export function installParticleEntrance(renderer, scene, camera, points, grid) {
         if (resolveSource && origins.update(resolveSource(progress.value), canvas.getBoundingClientRect(), renderer.getPixelRatio())) {
           for (const name of Object.keys(attributes)) geometry.attributes[name].needsUpdate = true;
         }
+        attached.sync();
         renderer.setClearAlpha(clearAlpha * progress.value);
         for (const item of decorations) { item.material.transparent = true; item.material.opacity = item.opacity * progress.value; }
         canvas.dataset.particleEntrance = String(progress.value);
@@ -160,6 +223,8 @@ export function installParticleEntrance(renderer, scene, camera, points, grid) {
           signal?.removeEventListener('abort', finish);
           points.material = originalMaterial;
           points.frustumCulled = originalCulling;
+          attached.dispose();
+          geometry.dispose();
           for (const name of Object.keys(attributes)) geometry.deleteAttribute(name);
           material.dispose();
           renderer.setClearAlpha(clearAlpha);
@@ -172,6 +237,7 @@ export function installParticleEntrance(renderer, scene, camera, points, grid) {
         update();
         renderer.render(scene, camera);
         onStart();
+        if (finished) return;
         tween = gsap.to(progress, { value: reverse ? 0 : 1, duration: reducedMotion ? 0 : 1.08, ease: 'power3.inOut',
           onUpdate: update, onComplete: () => { renderer.render(scene, camera); finish(); } });
       });

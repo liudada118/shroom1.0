@@ -20,6 +20,7 @@ export function createPointViewTools({ object, camera, controls, plane = object,
     centerTarget();
     controls.update();
     camera.updateMatrixWorld(true);
+    tools.notifyChange();
     return true;
   };
   /** 以点图底面中心变换对象，补偿父空间位移并保持镜头与观察目标不动。 */
@@ -36,6 +37,7 @@ export function createPointViewTools({ object, camera, controls, plane = object,
     }
     object.position.add(before.sub(after));
     object.updateWorldMatrix(true, true);
+    tools.notifyChange();
     return true;
   };
   if (localCenter) {
@@ -86,6 +88,7 @@ export function createPointViewTools({ object, camera, controls, plane = object,
       camera.lookAt(controls.target);
       controls.update();
       camera.updateMatrixWorld(true);
+      tools.notifyChange();
       return true;
     },
     /** 缩放相对点图中心，不拉向偏离垫面的世界原点。 */

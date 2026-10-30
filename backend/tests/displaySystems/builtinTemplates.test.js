@@ -12,6 +12,7 @@ const { createAppRuntime } = require('../../extension-host/appRuntimeFactory');
 const { BUILTIN_TEMPLATES } = require('../../extension-host/workspace/builtinSystemTemplates');
 const { registerSerialControlHandlers } = require('../../kernel/serial/serialControlService');
 const { createZeroChannelIdentityResolver } = require('../../kernel/platform/runtime/zeroChannelIdentityResolver');
+const { createLicenseAccessPolicy } = require('../../kernel/platform/license/licenseAccessPolicy');
 
 /** 在隔离目录组装真实发现与写入服务，不触及应用数据。 */
 function fixture(realResources = false) {
@@ -70,6 +71,46 @@ test('a managed native copy can use its own selected key scope, while local copi
     f.runtime.displaySystems.save({ builtinTemplate: { id: 'local-hand', name: '本地手部', sourceType: 'hand' } });
     assert.throws(() => f.runtime.builtinTemplates.resolve('local-hand', ['local-hand']), { code: 'LICENSE_SCOPE_REQUIRED' });
   } finally { f.close(); }
+});
+
+test('native switches recheck the current host scope before closing transports or opening databases', () => {
+  const f = fixture();
+  let time = 1000, scope = 'all', state = { file: 'normal' };
+  const policy = createLicenseAccessPolicy({ clock: { now: () => time, synchronize() {} }, setTimer: () => null });
+  policy.update({ ok: true, expiresAt: 2000, licenseExpiresAt: 2000 });
+  try {
+    const effects = [], handlers = [];
+    registerSerialControlHandlers({ register: handler => handlers.push(handler) }, {
+      requireAccess: policy.requireAccess,
+      getRuntime: () => state, setRuntime: patch => { state = { ...state, ...patch }; },
+      resolveSystemSelection: id => f.runtime.builtinTemplates.resolve(id, scope),
+      activateSystemSelection: f.runtime.builtinTemplates.activate,
+      stopAlternateTransport: () => effects.push('halow-stop'),
+      closeAllManagedSerialPorts: () => effects.push('serial-close'), closeMinzhenSensorPort: () => {},
+      initDb: type => { effects.push(`db:${type}`); return {}; }, getSensorBaudRate: () => 1000000,
+      petCareRuntimeService: { resetAll() {} }, stopPlaybackTimer: () => {}, publishSystemEvent: () => {},
+    });
+    const switchSystem = handlers.find(handler => handler.name === 'sensor-file-switch').handle;
+    switchSystem({ file: 'hand' });
+    assert.equal(state.file, 'hand');
+    scope = ['normal'];
+    const before = { ...state }, previousEffects = [...effects];
+    assert.throws(() => switchSystem({ file: 'hand' }), { code: 'LICENSE_SCOPE_REQUIRED', httpStatus: 403 });
+    assert.deepEqual(state, before);
+    assert.deepEqual(effects, previousEffects);
+    for (const source of BUILTIN_TEMPLATES) {
+      assert.equal(f.runtime.builtinTemplates.resolve(source.id, [source.id]).sourceType, source.id);
+      assert.throws(() => f.runtime.builtinTemplates.resolve(source.id, []), { code: 'LICENSE_SCOPE_REQUIRED' });
+    }
+    assert.equal(f.runtime.builtinTemplates.resolve('local-custom-matrix', []).sourceType, 'local-custom-matrix');
+    time = 3000;
+    assert.equal(policy.read().state, 'expired');
+    switchSystem({ file: 'normal' });
+    assert.equal(state.file, 'normal', '正常到期仍可进入授权范围内的历史系统');
+    assert.throws(() => switchSystem({ file: 'hand' }), { code: 'LICENSE_SCOPE_REQUIRED' });
+    policy.update({ ok: false, code: 'REVOKED', explicitDenial: true });
+    assert.throws(() => switchSystem({ file: 'normal' }), { code: 'REVOKED', httpStatus: 403 });
+  } finally { policy.dispose(); f.close(); }
 });
 
 test('old copies become editable and algorithms/charts persist independently with revision guards', () => {

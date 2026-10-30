@@ -47,6 +47,9 @@ export const appUi = {
   usageScope: text('首次使用默认开启，可随时关闭。记录功能使用、操作结果和耗时，不上传聊天正文、附件或原始传感器数据。关闭后清除尚未上传的使用统计，已送达数据按服务器规则保存；升级软件会保留你的开关选择。', 'Enabled on first use; you can turn it off at any time. Records feature usage, operation outcomes and durations, excluding chat text, attachments and raw sensor data. Turning it off clears unsent usage statistics; delivered data follows server retention rules. App upgrades preserve your choice.', '初回利用時は有効で、いつでも無効にできます。機能の利用、操作結果、所要時間を記録し、チャット本文、添付ファイル、生のセンサーデータは送信しません。無効にすると未送信の統計は削除され、送信済みデータはサーバーの保存規則に従います。アプリ更新後も設定は維持されます。'),
   retention: text('约定的使用统计保存目标为 90 天；实际清理执行状态请向管理员确认。', 'The intended usage-statistics retention period is 90 days. Ask your administrator about actual cleanup status.', '利用統計の保存期間は90日を予定しています。実際の削除状況は管理者に確認してください。'),
   queued: text('待上传 {{count}} 条', '{{count}} awaiting upload', '送信待ち {{count}} 件'),
+  qualityLoss: text('当前授权范围累计：未保留 {{dropped}} 条，校验失败 {{invalid}} 条，保存失败 {{storage}} 次。', 'Current license scope totals: {{dropped}} records not retained, {{invalid}} invalid records, {{storage}} storage failures.', '現在の認証範囲の累計：未保持 {{dropped}} 件、検証失敗 {{invalid}} 件、保存失敗 {{storage}} 回。'),
+  qualityLimits: text('已上传不代表观测完整；离线超出容量、记录过期或保存失败都可能造成缺口。', 'Successful uploads do not prove complete coverage. Offline capacity limits, expiry or storage failures can leave gaps.', '送信成功は観測の完全性を意味しません。オフライン時の容量上限、有効期限切れ、保存失敗により欠落する場合があります。'),
+  startupQualityLoss: text('本机启动诊断累计移除 {{count}} 条（仅本机汇总，不计入当前客户统计）。', 'This device has removed {{count}} startup diagnostic records; this local total is not attributed to the current customer.', 'この端末で削除された起動診断は累計 {{count}} 件です。ローカルの集計であり、現在の顧客統計には含めません。'),
   lastUpload: text('最近上传：{{time}}', 'Last upload: {{time}}', '最終送信：{{time}}'),
   retry: text('立即重试上传', 'Retry upload now', '今すぐ送信を再試行'),
 };

@@ -7,6 +7,36 @@ function renderer() {
 }
 
 describe('manifest renderer tool bridge', () => {
+  it('异步点图挂载前保留已保存边宽，挂载后应用且不提前展示能力', () => {
+    const bridge = createManifestRendererTools();
+    bridge.setWidgets([{ id: 'main', type: 'pointGrid' }]);
+    expect(bridge.getTuningControls().showEdgeBuffer).toBe(false);
+    bridge.sitValue({ edgeBuffer: 8 });
+    const regular = { ...renderer(), getTuningControls: () => ({ showEdgeBuffer: true, edgeBufferDefault: 4 }) };
+    bridge.rendererRef('main', 'pointGrid')(regular);
+    expect(regular.sitValue).toHaveBeenLastCalledWith({ edgeBuffer: 8 });
+  });
+  it('只为真实规则点图转发边缘缓冲，原始数字和物理点位拒绝该调参', () => {
+    const bridge = createManifestRendererTools();
+    bridge.setWidgets([{ id: 'main', type: 'pointGrid' }]);
+    const regular = { ...renderer(), getTuningControls: () => ({ showEdgeBuffer: true, edgeBufferDefault: 4 }) };
+    bridge.rendererRef('main', 'pointGrid')(regular);
+    expect(bridge.getTuningControls()).toMatchObject({ showEdgeBuffer: true, edgeBufferDefault: 4 });
+    bridge.sitValue({ edgeBuffer: 0 });
+    expect(regular.sitValue).toHaveBeenLastCalledWith({ edgeBuffer: 0 });
+    bridge.setWidgets([{ id: 'main', type: 'numMatrix', rendererParams: { frameInput: 'raw' } }]);
+    const numbers = renderer();
+    bridge.rendererRef('main', 'numMatrix')(numbers);
+    bridge.sitValue({ edgeBuffer: 8 });
+    expect(numbers.sitValue).not.toHaveBeenCalled();
+    expect(bridge.getTuningControls().showEdgeBuffer).toBe(false);
+    bridge.setWidgets([{ id: 'main', type: 'pointGrid' }]);
+    const physical = { ...renderer(), getTuningControls: () => ({ showEdgeBuffer: false }) };
+    bridge.rendererRef('main', 'pointGrid')(physical);
+    bridge.sitValue({ edgeBuffer: 8 });
+    expect(physical.sitValue).not.toHaveBeenCalled();
+    expect(bridge.getTuningControls().showEdgeBuffer).toBe(false);
+  });
   it('加载期间不声明能力，异步挂载后重放合并的最后调参且保留零值', () => {
     const bridge = createManifestRendererTools();
     bridge.setWidgets([{ id: 'main', type: 'pointGrid' }]);
@@ -22,7 +52,8 @@ describe('manifest renderer tool bridge', () => {
     expect(mounted.sitValue.mock.calls).toEqual([[{ valuej: 90, valuef: 0, valuel: 2 }]]);
     expect(mounted.changeColor.mock.calls).toEqual([[{ max: 90 }]]);
     expect(bridge.getTuningControls()).toEqual({ showGuass: true, showColor: true, showFilter: true,
-      showHeight: true, showConsis: true, showInit: true, showSize: false, showSpeed: false });
+      showHeight: true, showConsis: true, showInit: true, showSize: false, showSpeed: false,
+      showEdgeBuffer: false, edgeBufferDefault: undefined });
   });
 
   it('调参仅转发当前可见矩阵，隐藏和非矩阵组件不接收', () => {

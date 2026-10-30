@@ -50,6 +50,21 @@ export function RuntimeVersionDetails({ frontend = {}, runtimeVersions = {} }) {
   </dl>;
 }
 
+/** Show known telemetry gaps separately from successful upload, without interpreting silence as health. */
+export function UsageDeliveryDetails({ usage = {} }) {
+  const { t } = useTranslation();
+  const quality = usage.quality;
+  if (!quality) return null;
+  return <div role="status">
+    <p>{t('appUi.qualityLoss', { dropped: quality.droppedCount || 0, invalid: quality.invalidCount || 0,
+      storage: quality.storageFailureCount || 0 })}</p>
+    <p>{t('appUi.qualityLimits')}</p>
+    {usage.startupDiagnostics?.removed && <p>{t('appUi.startupQualityLoss', {
+      count: Object.values(usage.startupDiagnostics.removed).reduce((sum, count) => sum + (Number.isFinite(count) ? count : 0), 0),
+    })}</p>}
+  </div>;
+}
+
 /** Show webpage update and diagnostic controls together, with persistent status and recoverable errors. */
 export default function AppServices({ onAfterDialogClose } = {}) {
   const { t, i18n } = useTranslation();
@@ -96,6 +111,7 @@ export default function AppServices({ onAfterDialogClose } = {}) {
       <p>{t('appUi.usageScope')}</p>
       <p>{t('appUi.retention')}</p>
       <p role="status">{t('appUi.queued', { count: state.usage.queued || 0 })}{state.usage.lastSuccessAt ? ` · ${t('appUi.lastUpload', { time: new Date(state.usage.lastSuccessAt).toLocaleString(getLanguageLocale(i18n.language)) })}` : ''}</p>
+      <UsageDeliveryDetails usage={state.usage} />
       {(error || state.usage.lastError) && <p role="alert">{error ? t(error) : state.usage.lastError}</p>}
       <Button disabled={pending || !state.usage.enabled} onClick={() => action('retryUsage')}>{t('appUi.retry')}</Button>
     </Modal>

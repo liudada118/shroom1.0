@@ -58,7 +58,7 @@ Electron 渲染进程
 | 2. 装配后端 | [runtime/index.js](../backend/runtime/index.js) 的 `openServer` → [server.js](../backend/kernel/platform/server.js) | 固定桥懒加载组合根；组合根持有运行上下文、串口、存储、HTTP、WS 和扩展宿主 |
 | 3. 选网页来源 | `createWindow` → `startViteAndLoad` / `startStaticServer` | `!app.isPackaged` 且存在 client/Vite 才走开发态；开发服务失败有静态资源降级 |
 | 4. 加载页面 | `resolveBuildRoot`、`win.loadURL` → [App.jsx](../client/src/App.jsx) | 打包态优先 `resources/build/index.html`，再查应用路径的 build；随后由前端门户组织系统选择 |
-| 5. 进入业务 | [portalEntry.js](../client/src/page/licensePortal/portalEntry.js) | 用户确认进入才提交授权与系统切换；列表预览不是串口接入成功 |
+| 5. 进入业务 | [portalEntry.js](../client/src/page/licensePortal/portalEntry.js) | 用户确认进入才切换系统；复用同一连接内已验证且有效的密钥，首次或失效时验证；列表预览不是串口接入成功 |
 
 后端监听器可能在模块装配期间创建；不要把某个同步函数返回当成 HTTP/WS 已监听、串口已产帧的证明。
 

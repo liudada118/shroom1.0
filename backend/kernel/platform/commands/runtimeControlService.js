@@ -3,12 +3,8 @@
  * 这里承接显示配置、历史回放、采集控制、运行参数、历史维护和 CSV 导出等业务动作。
  */
 const { recordBusinessEvent } = require('../../../common/businessEvents');
-const { performance } = require('node:perf_hooks');
 
 function createRuntimeControlService(deps) {
-  let collectionStartedAt = null;
-  let collectionWriteStart = { written: 0, failed: 0 };
-  let collectionUsageContext = {};
   const {
     csvDownloadService,
     getRuntime,
@@ -140,19 +136,7 @@ function createRuntimeControlService(deps) {
       resetCollectionStorageClock();
     }
     setRuntime(next);
-    if (message.flag === true && runtime.flag !== true) {
-      collectionStartedAt = performance.now();
-      collectionWriteStart = deps.getCollectionWriteStats?.() || { written: 0, failed: 0 };
-      collectionUsageContext = deps.getUsageContext?.() || {};
-      recordBusinessEvent('collection_started', { ...collectionUsageContext, featureId: 'collection', result: 'success' });
-    } else if (message.flag === false && (runtime.flag === true || collectionStartedAt !== null)) {
-      const writeStats = deps.getCollectionWriteStats?.();
-      recordBusinessEvent('collection_finished', { ...collectionUsageContext, featureId: 'collection', result: !writeStats ? 'success'
-        : writeStats.failed > collectionWriteStart.failed ? 'failure' : writeStats.exact === false || writeStats.pending > 0 ? 'unknown' : 'success',
-        ...(writeStats?.exact !== false && writeStats ? { count: Math.max(0, writeStats.written - collectionWriteStart.written) } : {}),
-        durationMs: collectionStartedAt === null ? 0 : Math.min(86400000, performance.now() - collectionStartedAt) });
-      collectionStartedAt = null;
-    }
+    // ⚠️ 保存终态只由采集证据服务发布；控制回执成功时，异步尾帧仍可能尚未写完。
   }
 
   /**

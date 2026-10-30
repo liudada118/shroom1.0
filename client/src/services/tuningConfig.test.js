@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { registerNativeSystemTemplate } from '../displays/nativeSystemTemplates';
-import { readTuningConfig, writeTuningConfig, hasExplicitTuningValue } from './tuningConfig';
+import { readTuningConfig, writeTuningConfig, hasExplicitTuningValue, resolveColorSliderMax, normalizeDisplayTuning } from './tuningConfig';
 
 describe('调节参数的系统与模式缓存', () => {
   beforeEach(() => localStorage.clear());
@@ -43,5 +43,21 @@ describe('调节参数的系统与模式缓存', () => {
     expect(localStorage.getItem('unrelated')).toBe('keep');
     localStorage.setItem('valueConfig', JSON.stringify({ hand__normal: { value1: null, valueg1: 'bad', valuef1: 0, valuel1: '3' } }));
     expect(readTuningConfig({ sensorType: 'hand', mode: 'normal' })).toEqual({ valuef1: 0, valuel1: 3 });
+  });
+
+  it('颜色上限与缓冲宽度验证范围，坏缓存不会进入渲染器，0宽度可保存', () => {
+    const options = { sensorType: 'smallBed', mode: 'normal' };
+    for (const [valueType, value] of [['colorSliderMax', 0], ['colorSliderMax', 65536], ['edgeBuffer1', -1], ['edgeBuffer1', 1.5], ['edgeBuffer1', 17]]) {
+      expect(writeTuningConfig({ ...options, valueType, value })).toBe(false);
+    }
+    localStorage.setItem('valueConfig', JSON.stringify({ smallBed__normal: { colorSliderMax: -4, edgeBuffer1: 200 } }));
+    expect(readTuningConfig(options)).toEqual({});
+    writeTuningConfig({ ...options, valueType: 'colorSliderMax', value: 65535 });
+    writeTuningConfig({ ...options, valueType: 'edgeBuffer1', value: 0 });
+    expect(readTuningConfig(options)).toEqual({ colorSliderMax: 65535, edgeBuffer1: 0 });
+    expect(resolveColorSliderMax(undefined, 1205)).toBe(1205);
+    expect(resolveColorSliderMax(300, 1205)).toBe(300);
+    expect(normalizeDisplayTuning({ valuej1: 1205, colorSliderMax: 300 })).toMatchObject({ valuej1: 300, colorSliderMax: 300, edgeBuffer1: undefined });
+    expect(normalizeDisplayTuning({ valuej1: 25 })).toMatchObject({ valuej1: 25, colorSliderMax: undefined, edgeBuffer1: undefined });
   });
 });

@@ -16,6 +16,11 @@ const { claimApplicationInstance, checkApplicationPorts, startupFailureText } = 
 if (!claimApplicationInstance(app, () => {
   if (startupReady && !startupFailed && !appCleanupPromise && !focusMainWindow(mainWindow)) createWindow();
 })) return;
+const { createStartupDiagnostics } = require('./startupDiagnostics');
+const startupDiagnostics = createStartupDiagnostics({ app });
+// ⚠️ 必须早于后台依赖；致命异常只同步留有限证据，不拦截默认退出或等待网络。
+process.on?.('uncaughtExceptionMonitor', error => startupDiagnostics.record(error, { phase: 'main_process', uncaught: true }));
+app.on('will-quit', () => startupDiagnostics.markClean('normal'));
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -70,11 +75,30 @@ let backendStarted = false;
 let startupReady = false;
 
 /** 单次显示启动失败原因，再关闭本实例；后台未启动时不能进入会懒加载后台的清理链。 */
-function failStartup(error) {
+function failStartup(error, phase = 'local_service') {
   if (startupFailed) return;
   startupFailed = true;
+  const evidence = startupDiagnostics.record(error, { phase });
   const text = startupFailureText(error, app.getLocale());
-  require('electron').dialog.showErrorBox(text.title, text.message);
+  const dialog = require('electron').dialog;
+  const language = /^ja/i.test(app.getLocale()) ? 'ja' : /^zh/i.test(app.getLocale()) ? 'zh' : 'en';
+  const labels = {
+    zh: { saved: '安全诊断已保存在本机；尚不代表服务器已接收。', missing: '没有可用的本机诊断材料（已关闭、未选择或无法保存）。', close: '关闭', preview: '查看安全诊断', save: '保存诊断', failed: '未能保存诊断，请检查所选目录权限。' },
+    en: { saved: 'Safe diagnostics are stored locally; server receipt is not confirmed.', missing: 'No local diagnostic material is available (disabled, not selected, or storage unavailable).', close: 'Close', preview: 'View safe diagnostics', save: 'Save diagnostics', failed: 'Diagnostics could not be saved. Check the selected directory permissions.' },
+    ja: { saved: '安全な診断をローカルに保存しました。サーバー受信は未確認です。', missing: 'ローカル診断はありません（無効、未選択、または保存失敗）。', close: '閉じる', preview: '安全な診断を表示', save: '診断を保存', failed: '診断を保存できません。保存先の権限を確認してください。' },
+  }[language];
+  const detail = `${text.message}\n\n${evidence.code}\n${evidence.saved ? labels.saved : labels.missing}`;
+  const preview = startupDiagnostics.preview();
+  if (preview && typeof dialog.showMessageBoxSync === 'function') {
+    if (dialog.showMessageBoxSync({ type: 'error', title: text.title, message: detail,
+      buttons: [labels.close, labels.preview], defaultId: 0, cancelId: 0 }) === 1
+      && dialog.showMessageBoxSync({ type: 'info', title: labels.preview, message: evidence.code, detail: preview,
+        buttons: [labels.close, labels.save], defaultId: 0, cancelId: 0 }) === 1) {
+      const destination = dialog.showSaveDialogSync({ title: labels.save, defaultPath: 'Shroom-safe-diagnostics.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+      if (destination && !startupDiagnostics.exportTo(destination, preview)) dialog.showErrorBox(text.title, labels.failed);
+    }
+  } else dialog.showErrorBox(text.title, detail);
+  startupDiagnostics.markClean('startup_failed');
   if (backendStarted) app.quit(); else app.exit(1);
 }
 
@@ -98,9 +122,10 @@ function getAppServices() {
     getLicenseKey: require('../../backend/kernel/platform/license/licenseKeyStore').readStoredLicenseKey, fetchImpl,
     getSecrets: () => agentProcess?.getSecrets() || [],
     getRuntimeVersions: () => runtimeVersionSnapshot(backendStarted ? backendRuntime : {}, frontend),
-    onStatus: detail => { servicesStatus.usage = detail; publish(); } });
+    onStatus: detail => { servicesStatus.usage = { ...detail, startupDiagnostics: startupDiagnostics.status() }; publish(); } });
+  usage.registerOutbox(startupDiagnostics);
   appServices = { frontend, usage };
-  servicesStatus = { frontend: frontend.status(), usage: usage.status() };
+  servicesStatus = { frontend: frontend.status(), usage: { ...usage.status(), startupDiagnostics: startupDiagnostics.status() } };
   return appServices;
 }
 
@@ -697,6 +722,7 @@ async function prepareForUpdateInstall() {
   }
 
   await cleanupApplicationResources();
+  startupDiagnostics.markClean('upgrade');
   await new Promise((resolve) => setTimeout(resolve, 300));
 }
 
@@ -846,13 +872,14 @@ function startStaticServer({ hostname, port, win }) {
 // 应用生命周期
 // ============================================================
 app.whenReady().then(async () => {
-  await checkApplicationPorts();
+  try { await checkApplicationPorts(); }
+  catch (error) { failStartup(error, 'port_preflight'); return; }
   if (appCleanupPromise) return;
   startupReady = true;
   ipcMain.handle('services:command', async (event, action, input) => {
     if (!require('./agentProcess').isTrustedAgentSender(event, mainWindow)) throw new Error('应用来源无效。');
     const services = getAppServices();
-    if (action === 'status') return { frontend: { ...servicesStatus.frontend, ...services.frontend.status() }, usage: services.usage.status(),
+    if (action === 'status') return { frontend: { ...servicesStatus.frontend, ...services.frontend.status() }, usage: { ...services.usage.status(), startupDiagnostics: startupDiagnostics.status() },
       runtimeVersions: runtimeVersionSnapshot(backendRuntime, services.frontend) };
     if (action === 'frontendReady') {
       const value = services.frontend.ready(); servicesStatus.frontend = value;
@@ -866,8 +893,6 @@ app.whenReady().then(async () => {
     if (action === 'recordUsage') return services.usage.record(input);
     throw new Error('不支持的应用设置操作。');
   });
-  process.on('uncaughtExceptionMonitor', error => appServices?.usage.record({ eventName: 'error_reported', properties: {
-    module: 'electron', errorType: 'uncaughtException', severity: 'fatal', message: String(error.message), stack: String(error.stack || '') } }));
   const { registerAgentIpc } = require('./agentProcess');
   registerAgentIpc({ ipcMain, getWindow: () => mainWindow, getProcess: getAgentProcess });
   // 防止息屏后系统暂停应用，保持 WebSocket 数据通道持续工作
@@ -938,7 +963,7 @@ app.whenReady().then(async () => {
   });
 }).catch(error => {
   logger.error('[Startup] Application initialization failed:', error);
-  failStartup(error);
+  failStartup(error, 'initialization');
 });
 
 app.on("window-all-closed", () => {

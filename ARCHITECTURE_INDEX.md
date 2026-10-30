@@ -1,7 +1,19 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-29
+> 最后更新于：2026-10-30
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
+
+源码版本1.1.44（2026-10-30）：根package与锁文件同步由1.1.43递增，用户说明见 `release-notes/windows/1.1.44.md`，汇总本轮诊断、显示调节、回执和入口修复；版本提交不代表安装包已生成或线上更新已发布。
+
+采集回执提示与回放日期：`RuntimeStatusNotice` → `services/collectionNotice` 控制成功回执6秒寿命及标签页去重；保存中/异常结果保留，后台采集状态不清除。`portalPlaybackSelection` 仅格式化秒/毫秒记录标题，操作沿用原ID。验证 collectionNotice / RuntimeStatusNotice / portalPlaybackSelection / PortalPlaybackDialog 和 `collection-exit-portal.mjs`；仅展示行为使用Standard。
+
+2026-10-30 外围点进出场：`edgeBufferPoints` 提供主网格锚点，`particleEntrance.attachParticleChildren` 为外围安装完整投影属性并共享主图进度；几何换宽在绘制前重绑，完成/取消先释放临时GPU属性再恢复原材质。入口为小床/手部，验证 particleEntrance / pointGridEdgeBuffer 和 `point-buffer-entrance.mjs`，涉及共享渲染执行Full。
+
+2026-10-30 颜色上限与点图边缘缓冲：`Title` / `Home` → `tuningConfig` 按系统和模式保存 `colorSliderMax`、`edgeBuffer1`。小床、手部与 SDK 规则点图经 `pointGrid/core/edgeBuffer` / `react/edgeBufferPoints` 对显示副本使用零边界高斯，在矩阵外按当前平滑高度渐降至零；保持主几何索引、统计缓存与视角。物理点位及数字模式不显示边框设置。验证入口 tuningConfig / Title.tuningPersistence / edgeBuffer / point-tuning-home，共享渲染行为执行 Full。
+
+2026-10-29 视角与翻转持久化：`Title` 常驻 `WorkspaceViewPersistence`，经 `services/workspaceViewConfig` 按真实系统 ID + 显示模式保存旋转/镜头/缩放/横纵镜像；工具箱隐藏和纯点图不撤销绑定。共享 `workspaceViewTools` 提供有限快照、原子恢复与变更订阅，小床保留底面中心及默认俯视复位，手套模式防止 resize/迟到模型覆盖已恢复镜头。测试入口 workspaceViewConfig / workspaceViewTools / pointViewTools、实际小床按钮和手套 Home 浏览器回归；共享 SDK 渲染行为执行 Full。验证系统慢已定位为每次进入的联网授权等待（8秒超时后才回退签名缓存，门户总等待20秒），本轮未改授权规则，详见维护记录。
+
+2026-10-29 错误与埋点证据链：`startupDiagnostics` 在后台加载前同步保存有界启动/致命错误，未知退出只作 warning；`usageEvidence` 连接宿主与采集日志，`collectionSessionService` 将最终结果和不可变 v2 发件箱同文件提交，SQL 迟到结果追加修订。`usageAnalytics` 共用原授权范围预算、优先级与 consent epoch，保留重复计数/质量缺口并等待持久 ACK，能力探测兼容旧接收端；应用设置显示已知损失。配套 `E:/key` 新增 0027 迁移和最高完整修订统计，尚未部署。范围及未实施项见 [实施记录](docs/telemetry-implementation-20261029.md)；验证入口 usageDeliveryQuality / startupDiagnostics / collectionUsageOutbox，Full 8 项通过。
 
 2026-10-29 采集有效数据门槛：`collectionSourceMonitor` 观察当前系统/连接代次的真实 canonical 帧，端口打开但没有有效数据不能开始；5 秒无有效帧通过既有 finishCollection 排空已接收数据并停止，恢复不自动重开。`runtimeControlService` 在创建会话前拒绝无连接/无数据/回放，Title 等 HTTP 成功回执后才更新采集状态；低频 collectionSourceStatus 经 WS 首包及采集状态 API 同步。清屏零帧仅带内部 synthetic 元数据，不改变帧契约；真实全零数据仍有效。验证 collectionStartGuard / collectionSourceMonitor、SerialManager 首帧顺序、HaLow TCP、采集页面与 Full。
 
@@ -89,6 +101,8 @@ Electron main
   ├─ app/update/frontendCache.js           构建优先级、资源复用、缓存清理、次启动与回退
   ├─ app/electron/usageAnalytics.js        有限使用事件、脱敏错误与隔离上传队列
   │    └─ backend/common/frameUsageObserver.js 连接首帧/断流状态与接收计数旁路
+  │    └─ backend/common/usageEvidence.js 可信原身份桥、采集终态/修订发件箱
+  ├─ app/electron/startupDiagnostics.js    后台加载前同步诊断、未知退出与主动安全导出
   ├─ app/electron/deviceIdentity.js        本机安装标识摘要
   ├─ app/electron/agentProcess.js          主窗口受限 IPC、凭据、独立 Agent 生命周期
   │    └─ backend/agent-runtime/worker.js  utilityProcess：Responses、任务、附件、业务工具
@@ -148,7 +162,7 @@ HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`ha
 
 门户公司系统提示：`portalSystems.needsCompanySystemSync` 识别仅含内置系统的密钥并跳过公司目录请求；`LicensePortal` 对空目录保持安静，只在新增系统或公司同步异常时显示中性状态，原有受管系统授权核验不变。验证 `portalSystems.test.js` 与 Full。
 
-公司系统进入授权：`LicensePortal` 向 `createPortalEntry` 提供签名目录读取器；`finish` 在本轮密钥激活后获取 `/api/system-packages/status`，将其系统 ID 与激活回执范围一起传给 `isPortalSystemAllowed`。取消后不接受迟到目录，目录缺失或范围不匹配仍拒绝；验证 `portalEntry.test.js` 与 Full。
+系统进入授权（2026-10-30）：`portalEntry` 在当前连接内复用绑定同一密钥的成功HTTP回执；`LicensePortal` 也可接入已验证的宿主启动快照。换密钥、断线、权限变化或到期后失效，显式验证仍联网。进入公司系统每次读取本机 `/api/system-packages/status`，结合已验证范围判断；系统切换仍由后台检查期限、当前内置系统范围及公司签名目录。验证 portalEntry / builtinTemplates、`portal-entry-reuse.mjs` 与 Full。
 
 生产监测页加载：`client/vite.config.js` 的混淆器设置 `ignoreImports: true`，保留动态导入字面量，使 `loadMonitoringPage` 正确输出 Home chunk。`LicensePortal` 仅对已配置员工令牌的客户端显示修订入口；`CompanySystemRevisions.readStaffReleases` 未配置时不调用员工目录。验证 `loadMonitoringPage.build.test.js`、`CompanySystemRevisions.test.jsx`、`PortalSystemSelector.test.jsx`、Full，以及 `node scripts/tests/production-monitoring.mjs` 的临时生产构建和真实页面进入/返回；`--build-dir <临时构建目录>` 可只复测页面。
 

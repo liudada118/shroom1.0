@@ -143,15 +143,19 @@ function createBuiltinSystemTemplates({ root, managedRoot = null, isOccupied = (
     return { id, deleted: true, dataRetained: true };
   }
 
-  /** Check a local copy against its source; managed copies use their explicitly licensed system ID. */
+  /** 检查当前密钥的内置系统/副本范围；本地 Manifest 独立，受管副本按自身 ID 授权。 */
   function resolve(id, scope) {
     const template = stored(id);
-    if (!template) return { id, sourceType: id, template: false };
+    const requiredType = template?.managed ? template.id : template?.sourceType || id;
+    const allowed = scope === 'all' || (Array.isArray(scope) ? scope : [scope]).includes(requiredType);
+    if (!template) {
+      // ⚠️ 进入页面可复用旧验证结果；宿主必须按此刻的范围拦住其他窗口已撤去的内置系统权限。
+      if (TYPES.has(id) && !allowed) throw Object.assign(templateError('LICENSE_SCOPE_REQUIRED', '当前授权不包含此内置系统。'), { httpStatus: 403 });
+      return { id, sourceType: id, template: false };
+    }
     // ⚠️ 受管副本在 server.js 切换前还须通过签名目录校验；仅有本地系统 ID 不能直接放行。
     // ⚠️ A signed local revision is an authoring workspace, not a customer grant to its published source.
-    const allowed = (!template.managed && isRevisionDraft(id))
-      || scope === 'all' || (Array.isArray(scope) ? scope : [scope]).includes(template.managed ? template.id : template.sourceType);
-    if (!allowed) throw Object.assign(templateError('LICENSE_SCOPE_REQUIRED', template.managed
+    if (!allowed && !(!template.managed && isRevisionDraft(id))) throw Object.assign(templateError('LICENSE_SCOPE_REQUIRED', template.managed
       ? '当前密钥未选择此公司系统。' : '当前授权不包含此模板的原系统。'), { httpStatus: 403 });
     return { ...template, template: true };
   }

@@ -1,7 +1,16 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { FrontendUpdateControls, FrontendUpdateStatus, RuntimeVersionDetails } from './AppServices';
+import { FrontendUpdateControls, FrontendUpdateStatus, RuntimeVersionDetails, UsageDeliveryDetails } from './AppServices';
+
+describe('统计投递质量', () => {
+  it('展示已知缺口，旧宿主没有质量信息时不冒充零丢失', () => {
+    expect(renderToStaticMarkup(<UsageDeliveryDetails />)).toBe('');
+    const html = renderToStaticMarkup(<UsageDeliveryDetails usage={{ quality: { droppedCount: 8, invalidCount: 2, storageFailureCount: 3 } }} />);
+    expect(html).toContain('未保留 8 条'); expect(html).toContain('校验失败 2 条'); expect(html).toContain('保存失败 3 次');
+    expect(html).toContain('已上传不代表观测完整');
+  });
+});
 
 describe('网页更新结果', () => {
   it('服务未发布的原因在重新打开设置后保留，并以可访问错误提示显示', () => {

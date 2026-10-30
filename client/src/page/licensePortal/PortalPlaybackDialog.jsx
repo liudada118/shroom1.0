@@ -116,7 +116,7 @@ export default function PortalPlaybackDialog({
                 onChange={(event) => onDownloadsChange?.(togglePlaybackDownload(normalized, downloadValues, record.value, event.target.checked))} />
             </label></td>
             <td><div className="portal-playback-record"><strong>{record.label}</strong>
-              {record.label !== String(record.value) && <small>{String(record.value)}</small>}
+              {record.detail && <small>{record.detail}</small>}
               {record.disabled && <small>{i18n.t('monitorUi.recordUnavailable')}</small>}
             </div></td>
           </tr>)}</tbody>
