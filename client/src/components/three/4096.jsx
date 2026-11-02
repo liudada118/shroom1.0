@@ -804,6 +804,7 @@ const Canvas = React.forwardRef((props, refs) => {
     }
     console.log(ndata1, 111)
   }
+  /** 接收完整的64×64压力帧；无效帧保留上一帧，避免插值污染平滑缓存。 */
   function sitData(prop, local) {
 
     if (i < 50) {
@@ -821,6 +822,12 @@ const Canvas = React.forwardRef((props, refs) => {
       valuef,
       valuelInit,
     } = prop;
+    // ⚠️ 短帧或非有限值会让点高变成NaN，后续正常帧也无法恢复缺失的点图。
+    if ((!Array.isArray(wsPointData) && !ArrayBuffer.isView(wsPointData))
+      || wsPointData.length !== sitnum1 * sitnum2) return;
+    for (let index = 0; index < wsPointData.length; index++) {
+      if (!Number.isFinite(wsPointData[index])) return;
+    }
     // console.log(wsPointData )
     //   valueg,
     //   value,

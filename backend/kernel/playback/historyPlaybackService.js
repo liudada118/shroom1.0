@@ -127,6 +127,10 @@ function buildZeroPlaybackFrame({
       ? new Array(256).fill(0)
       : new Array(1024).fill(0);
   }
+  // ⚠️ 64×64 清屏也必须是完整帧，短帧会让点图插值和平滑缓存出现 NaN，导致后续回放缺图。
+  if (sensorType === 'bed4096' || sensorType === 'bed4096num') {
+    return new Array(4096).fill(0);
+  }
   return sensorType === 'bigBed'
     ? new Array(2048).fill(0)
     : new Array(1024).fill(0);

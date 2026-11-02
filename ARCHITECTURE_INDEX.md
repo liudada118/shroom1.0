@@ -1,9 +1,13 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-30
+> 最后更新于：2026-10-31
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
 源码版本1.1.44（2026-10-30）：根package与锁文件同步由1.1.43递增，用户说明见 `release-notes/windows/1.1.44.md`，汇总本轮诊断、显示调节、回执和入口修复；版本提交不代表安装包已生成或线上更新已发布。
+
+2026-10-31 64×64高速回放：`historyPlaybackService.buildZeroPlaybackFrame` 为 `bed4096` / `bed4096num` 生成4096点清屏；`4096.jsx.sitData` 拒收长度或有限数值校验不通过的帧，避免NaN永久污染平滑缓存。正常采集、历史和CSV取数保持完整4096点。验证入口 `playbackFrameService.test.js` / `serverHistoryLoader.test.js` / `scripts/tests/fast64-replay-home.mjs`，涉及回放使用Full；异机故障记录尚未读取。
+
+2026-10-30 更新标记直达详情：`UpdateNotifier` 将有新版本/下载中/已下载/错误状态呈现为可点击、可键盘激活的按钮，打开原更新详情；检查中/已最新仍为提示。`AppTools` 对独立状态不触发悬停展开，防止窄屏横幅位移让点击落空；下载/安装仍由详情按钮明确触发。验证 `scripts/tests/app-tools.mjs` 和Standard，仅修改前端交互。
 
 2026-10-30 背心调节布局：`Title` 为 `pressureVest` 与 `humanBodyOptimized` 提供同一抽屉插槽，`HumanBodyOptimized` 统一按 `portalEmbedded` 决定调节位置；Home 的宿主传递及画布 key 不变，背心独立参数存储继续沿用。背景/模型预设采用固定32×32圆形按钮，避免通用按钮最小高度拉伸。验证入口 `scripts/tests/human-body-portal.mjs`，仅界面布局使用Standard。
 

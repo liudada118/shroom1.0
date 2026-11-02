@@ -90,4 +90,60 @@ for (const data of [pressureData, [...pressureData, ...orientation], { pressureD
 const mapped = Array.from({ length: 147 }, (_, index) => index);
 assert.strictEqual(glovePlaybackFrames({ backRows: [{ data: JSON.stringify([...mapped, ...orientation]) }] })[0].payload.stages.mapped.length, 147);
 
+const sensors = require('@shroom/backend/sensors');
+const { buildZeroPlaybackPayload } = require('../../kernel/playback/historyPlaybackService');
+const { createHistoryFrameTransformService } = require('../../kernel/playback/historyFrameTransformService');
+const { createCollectionFrameStorageService } = require('@shroom/backend/collection');
+const { createLegacyGenericMatrixFrameProcessor } = require('../../extensions/built-in-sensors/legacyGenericMatrixFrameProcessor');
+const { zeroLineMatrix } = require('@shroom/backend/processing');
+const { buildSensorFrameEnvelope } = require('../../kernel/realtime/sensorFrameEnvelope');
+
+for (const sensorType of ['bed4096', 'bed4096num']) {
+  const clear = buildZeroPlaybackPayload({ sensorType, smallBed12BType: sensors.SMALL_BED_12B_TYPE });
+  assert.strictEqual(clear.sitData.length, 4096, '64×64 回放清屏必须覆盖完整矩阵');
+  assert.ok(clear.sitData.every(value => value === 0));
+}
+for (const [sensorType, matrixMode, expectedLength] of [
+  ['bigBed', undefined, 2048],
+  ['smallBed12B', '16x16', 256],
+  ['smallBed12B', '32x32', 1024],
+  ['pressureVest', undefined, 1024],
+]) {
+  const clear = buildZeroPlaybackPayload({ sensorType, smallBed12BType: sensors.SMALL_BED_12B_TYPE,
+    smallBed12BDisplayOptions: { matrixMode } });
+  assert.strictEqual(clear.sitData.length, expectedLength);
+}
+
+const bedType = 'bed4096num';
+const rawBed = Buffer.from(Array.from({ length: 4096 }, (_, index) => (index * 17 + Math.floor(index / 64) * 13) % 251));
+const bedProcessor = createLegacyGenericMatrixFrameProcessor({
+  isCar: () => false, isSmallBedMatrixType: sensors.isSmallBedMatrixType, zeroLineMatrix,
+});
+const realtimeBed = bedProcessor.processBed4096Frame(rawBed, { file: bedType, colHZ: 95 });
+const bedStorage = createCollectionFrameStorageService({
+  getSensorType: () => bedType,
+  isZeroFrameStorageType: sensors.isZeroFrameStorageType,
+  isSmallBedMatrixType: sensors.isSmallBedMatrixType,
+  getFrameMatrixData: sensors.getFrameMatrixData,
+  tempFullBedType: sensors.TEMP_FULL_BED_TYPE,
+  smallBed12BType: sensors.SMALL_BED_12B_TYPE,
+  buildZeroAwareStorageData: () => assert.fail('64×64 帧不能走手部 256 点存储路径'),
+});
+const bedFrame = JSON.parse(realtimeBed.jsonData);
+const bedRow = { data: bedStorage.buildSitCollectionData(bedFrame), timestamp: 1000 };
+const bedPlayback = createPlaybackFrameService({
+  isHandGloveType: sensors.isHandGloveType,
+  isSmallBedMatrixType: sensors.isSmallBedMatrixType,
+  isThreePortFile: sensors.isThreePortFile,
+});
+const bedPayload = bedPlayback.buildPayloads({ sensorType: bedType, sitRows: [bedRow] }).sitPayload;
+const bedEnvelope = buildSensorFrameEnvelope({ channel: 'sit', sensorType: bedType,
+  source: 'playback', payload: bedPayload });
+const bedTransforms = createHistoryFrameTransformService(sensors);
+assert.strictEqual(realtimeBed.frame.length, 4096);
+assert.deepStrictEqual(JSON.parse(bedRow.data), realtimeBed.frame, '采集保存完整 4096 点');
+assert.deepStrictEqual(bedEnvelope.payload.value, realtimeBed.frame, '回放不得裁剪或再次转换线序');
+assert.deepStrictEqual(bedTransforms.normalizeHistoryPressureData(bedRow, bedType), realtimeBed.frame, 'CSV 使用完整 4096 点');
+assert.deepStrictEqual(sensors.getFrameMatrixData(bedFrame, 'sitData'), realtimeBed.frame);
+
 console.log('playbackFrameService.test.js passed');

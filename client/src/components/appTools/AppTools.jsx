@@ -42,11 +42,11 @@ export default function AppTools() {
 
   useEffect(() => {
     const root = rootRef.current;
-    /** 用原生DOM边界保持悬停，避免外部React树Portal进来的反馈按钮触发假离开。 */
+    /** 用真实DOM保持悬停；独立更新标记不展开横幅，避免窄窗点击时移位。 */
     const enter = (event) => {
       if (event.pointerType !== 'mouse') return;
       const hit = document.elementFromPoint(event.clientX, event.clientY);
-      if (!root.contains(hit) || hit?.closest('dialog, [role="dialog"]')) return;
+      if (!root.contains(hit) || hit?.closest('dialog, [role="dialog"], .shroom-app-update-status')) return;
       pointerInside.current = true;
       setExpanded(true);
     };
@@ -87,7 +87,7 @@ export default function AppTools() {
         setExpanded(false);
       }
     };
-    root.addEventListener('pointerenter', enter);
+    root.addEventListener('pointerover', enter);
     root.addEventListener('pointerleave', leave);
     root.addEventListener('pointerdown', pointerDown, true);
     root.addEventListener('focusin', focusIn);
@@ -95,7 +95,7 @@ export default function AppTools() {
     root.addEventListener('keydown', keyDown, true);
     document.addEventListener('pointerdown', outside);
     return () => {
-      root.removeEventListener('pointerenter', enter);
+      root.removeEventListener('pointerover', enter);
       root.removeEventListener('pointerleave', leave);
       root.removeEventListener('pointerdown', pointerDown, true);
       root.removeEventListener('focusin', focusIn);

@@ -394,8 +394,12 @@ export default function UpdateNotifier({ statusContainer, onAfterDialogClose } =
   // 如果不在 Electron 环境中，不渲染
   if (!isElectron) return null;
 
+  const canOpenUpdateDetails = [UPDATE_STATE.AVAILABLE, UPDATE_STATE.DOWNLOADING,
+    UPDATE_STATE.DOWNLOADED, UPDATE_STATE.ERROR].includes(updateState);
   const status = <div className="shroom-app-update-status" role="status" aria-live="polite">
-    {renderStatusTag()}
+    {canOpenUpdateDetails ? <button type="button" className="shroom-app-update-status-button"
+      aria-haspopup="dialog" aria-expanded={showModal} title={t('update.title')}
+      onClick={() => setShowModal(true)}>{renderStatusTag()}</button> : renderStatusTag()}
   </div>;
 
   return (
@@ -409,18 +413,13 @@ export default function UpdateNotifier({ statusContainer, onAfterDialogClose } =
           disabled={updateState === UPDATE_STATE.CHECKING}
           icon={<SyncOutlined spin={updateState === UPDATE_STATE.CHECKING} />}
           onClick={() => {
-            if (
-              updateState === UPDATE_STATE.AVAILABLE ||
-              updateState === UPDATE_STATE.DOWNLOADING ||
-              updateState === UPDATE_STATE.DOWNLOADED ||
-              updateState === UPDATE_STATE.ERROR
-            ) {
+            if (canOpenUpdateDetails) {
               setShowModal(true);
             } else {
               handleCheckUpdate();
             }
           }}
-          title={t([UPDATE_STATE.AVAILABLE, UPDATE_STATE.DOWNLOADING, UPDATE_STATE.DOWNLOADED].includes(updateState) ? "update.title" : "update.check")}
+          title={t(canOpenUpdateDetails ? "update.title" : "update.check")}
           aria-label={t("update.title")}
         >{t("update.action")}</Button>
       </div>

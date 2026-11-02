@@ -23,11 +23,12 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   const url = `http://127.0.0.1:${server.httpServer.address().port}/src/components/appTools/__fixtures__/tools.html`;
   await page.goto(url);
-  const dock = page.getByRole('group', { name: '应用工具' });
+  const dock = page.locator('.shroom-app-tools');
   const agent = dock.locator('.shroom-agent-entry');
   const trigger = dock.locator('.shroom-app-tools-toggle');
   const banner = dock.locator('.shroom-app-tools-banner');
   await trigger.waitFor();
+  assert.equal(await dock.getAttribute('role'), 'group');
   await dock.getByRole('button', { name: /版本历史 · v1.1.37/, includeHidden: true }).waitFor({ state: 'attached' });
   await dock.getByRole('button', { name: '反馈', exact: true, includeHidden: true }).waitFor({ state: 'attached' });
 
@@ -62,6 +63,7 @@ try {
     await expand();
     const result = await dock.evaluate((element) => {
       const buttons = [...element.querySelectorAll('button')].filter((button) => !button.closest('dialog')
+        && !button.closest('.shroom-app-update-status')
         && !button.classList.contains('shroom-app-tools-toggle'));
       return { viewport: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth,
         rootTransform: getComputedStyle(element).transform,
@@ -102,7 +104,7 @@ try {
     assert.equal(await banner.evaluate((element) => element.inert), true);
     const compact = await dock.boundingBox();
     const compactButtons = await dock.evaluate((element) => [...element.querySelectorAll('button')]
-      .filter((button) => !button.closest('dialog, [inert]') && button.getBoundingClientRect().height > 0)
+      .filter((button) => !button.closest('dialog, [inert], .shroom-app-update-status') && button.getBoundingClientRect().height > 0)
       .map((button) => ({ width: button.getBoundingClientRect().width, className: button.className })));
     assert.equal(compactButtons.length, 2, '折叠时只有文字入口和 Agent 可以点击');
     assert.ok(compact.width <= compactButtons.reduce((sum, button) => sum + button.width, 0) + 36,
@@ -115,6 +117,54 @@ try {
     await page.keyboard.press('Tab');
     assert.ok(await agent.evaluate((button) => document.activeElement === button), '折叠后 Tab 跳过横幅按钮直达 Agent');
     return compact;
+  }
+
+  /** 在折叠横幅外直接操作更新标记，防止悬停移位或误触发下载、安装。 */
+  async function checkStatusEntry(event, state, activation, width) {
+    await page.setViewportSize({ width, height: 844 });
+    await collapse();
+    await page.evaluate((data) => window.appToolsFixture.update(data), event);
+    await page.waitForFunction((expected) => document.querySelector('.shroom-app-update')?.dataset.state === expected, state);
+    const statusButton = dock.locator('.shroom-app-update-status-button');
+    await statusButton.waitFor();
+    assert.equal(await statusButton.getAttribute('aria-haspopup'), 'dialog');
+    assert.equal(await statusButton.getAttribute('aria-expanded'), 'false');
+    assert.equal(await statusButton.evaluate((button) => Boolean(button.closest('[inert]'))), false);
+    const callsBefore = await page.evaluate(() => window.appToolsFixture.calls.length);
+    const bounds = await statusButton.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, '更新标记完整位于视口内');
+    await statusButton.hover();
+    await page.waitForTimeout(350);
+    assert.equal(await dock.getAttribute('data-expanded'), 'false', '悬停更新标记不能展开横幅并移动点击目标');
+    const hovered = await statusButton.boundingBox();
+    assert.ok(Math.abs(hovered.x - bounds.x) < .5 && Math.abs(hovered.y - bounds.y) < .5,
+      '更新标记悬停前后不能移位');
+    if (activation === 'mouse') await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    else {
+      await statusButton.focus();
+      await statusButton.press(activation);
+    }
+    const details = page.getByRole('dialog', { name: /安装包更新|软件更新/ });
+    await details.waitFor();
+    assert.equal(await statusButton.getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.evaluate(() => window.appToolsFixture.calls.length), callsBefore,
+      '打开状态详情不能发送更新检查、下载或安装命令');
+    if (state === 'available' && width === 320 && activation === 'mouse') {
+      await page.waitForFunction((element) => {
+        const style = getComputedStyle(element);
+        return style.opacity === '1' && style.transform === 'none';
+      }, await details.elementHandle());
+      await page.screenshot({ path: join(artifacts, 'update-status-details-320.png') });
+    }
+    await details.getByRole('button', { name: /^关\s*闭$/ }).click();
+    await details.waitFor({ state: 'hidden' });
+    await statusButton.click();
+    await details.waitFor();
+    assert.equal(await page.evaluate(() => window.appToolsFixture.calls.length), callsBefore,
+      '关闭后重新打开详情仍不能触发更新命令');
+    await details.getByRole('button', { name: /^关\s*闭$/ }).click();
+    await details.waitFor({ state: 'hidden' });
+    console.log('UPDATE_STATUS_ENTRY_PASS', JSON.stringify({ state, activation, width, bounds }));
   }
 
   const initialCompact = await checkCollapsed();
@@ -227,6 +277,28 @@ try {
     await page.setViewportSize({ width: 320, height: 844 });
     await checkLayout();
   }
+  assert.equal(await dock.locator('.shroom-app-update-status-button').count(), 0, '已是最新状态无需可点击标记');
+  const available = { type: 'update-available', version: '1.1.44', releaseNotes: '合成更新说明' };
+  for (const width of [820, 320]) await checkStatusEntry(available, 'available', 'mouse', width);
+  for (const key of ['Enter', 'Space']) await checkStatusEntry(available, 'available', key, 320);
+  for (const [event, state] of [
+    [{ type: 'download-progress', percent: 42.8 }, 'downloading'],
+    [{ type: 'update-downloaded', version: '1.1.44' }, 'downloaded'],
+    [{ type: 'update-error', message: '合成网络异常' }, 'error'],
+  ]) await checkStatusEntry(event, state, 'mouse', 320);
+  await collapse();
+  await dock.locator('.shroom-app-update-status-button').hover();
+  await settleExpanded(false);
+  await trigger.hover();
+  await settleExpanded(true);
+  // 批量合成的更新通知不应覆盖后续与更新无关的夹具入口，按真实关闭按钮逐个收起。
+  const notices = page.locator('.ant-notification-notice');
+  while (await notices.count()) {
+    const previousCount = await notices.count();
+    await notices.last().locator('.ant-notification-notice-close').click();
+    await page.waitForFunction((count) => document.querySelectorAll('.ant-notification-notice').length < count, previousCount);
+  }
+  await expand();
   await page.evaluate(() => window.appToolsFixture.update({ type: 'download-progress', percent: 42.8 }));
   await dock.getByRole('button', { name: /安装包更新|软件更新/ }).click();
   const update = page.getByRole('dialog', { name: /安装包更新|软件更新/ });

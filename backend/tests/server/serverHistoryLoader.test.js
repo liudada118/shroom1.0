@@ -33,6 +33,16 @@ try {
   assert.throws(() => loader.load('missing'), /没有可回放的数据/);
   assert.strictEqual(loader.events.at(-1).length, 0);
 
+  const bedValues = Array.from({ length: 4096 }, (_, index) => index % 251);
+  sit.prepare('INSERT INTO matrix(data,timestamp,date) VALUES (?,?,?)')
+    .run(JSON.stringify(bedValues), 1000, 'fast-bed');
+  const bedLoader = createServerHistoryLoader({ sit, back }, 'bed4096num');
+  assert.strictEqual(bedLoader.load('fast-bed').length, 1);
+  assert.strictEqual(bedLoader.events.at(-1).sitData.length, 4096, '真实历史加载事件使用完整 64×64 清屏');
+  assert.ok(bedLoader.events.at(-1).sitData.every(value => value === 0));
+  assert.deepStrictEqual(JSON.parse(bedLoader.state.get('localData')[0].data), bedValues);
+  assert.strictEqual(bedLoader.errors.length, 0);
+
   let now = 0;
   let scheduledTick = null;
   const scheduled = createServerHistoryLoader({ sit, back }, 'hand0205', {

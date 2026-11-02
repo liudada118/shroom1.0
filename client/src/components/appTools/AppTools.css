@@ -114,6 +114,20 @@
   overflow-wrap: anywhere;
   box-shadow: 0 4px 16px #0003;
 }
+.shroom-app-update-status-button {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.shroom-app-update-status-button:hover .ant-tag { border-color: currentColor; }
+.shroom-app-update-status-button:focus-visible { outline: 2px solid #78d3f5; outline-offset: 3px; }
 @media (max-width: 960px) {
   .shroom-app-tools-banner {
     right: -1px;
