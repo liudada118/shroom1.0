@@ -6,6 +6,8 @@ import PortalPlaybackDialog from '../../page/licensePortal/PortalPlaybackDialog'
 import PortalWorkspaceTools from '../../page/licensePortal/PortalWorkspaceTools';
 import WorkspaceViewPersistence from './WorkspaceViewPersistence';
 import TuningNumberInput from './TuningNumberInput';
+import SerialReadingNotice from './SerialReadingNotice';
+import { getNativeSerialBaudDefault } from '../../services/serial/serialBaudDefaults';
 import PortalRendererControls from '../../page/licensePortal/PortalRendererControls';
 import { createPortalCsvBatch } from './portalCsvBatch';
 import { capturePortalOperation, executePortalLegacyControl } from './portalOperationGuard';
@@ -42,6 +44,7 @@ import JqbedAlgorithmConfigModal from '../../extensions/jqbed/JqbedAlgorithmConf
 import { getJqbedConfigAccess } from '../../extensions/jqbed/jqbedAlgorithmConfig';
 import { commandClient, commandFromLegacyFields } from '../../services/command/commandClient';
 import { serialFeedback, serialErrorText } from '../../services/serial/serialFeedback';
+import { detectSerialConnection, waitForSerialConnectionData, serialDetectionAction, SERIAL_DETECTION_BAUD_RATES } from '../../services/serial/serialConnectionDetection';
 import HalowConnection from './HalowConnection';
 import { PRESSURE_VEST_MATRIX } from '../video/pressureVestConfig';
 import { gloveExhibitionConfig } from '../../page/home/gloveExhibition';
@@ -375,7 +378,11 @@ class Title extends React.Component {
       dynamicSensors: [],
       manifestPortSelections: {},
       serialStates: {},
+      serialDefaults: null,
+      serialBaudRate: null,
       serialPending: {},
+      serialDetections: {},
+      serialDetectionDialog: null,
       jqbedAlgorithmConfigOpen: false,
     }
     this.inputRef = React.createRef(null)
@@ -411,12 +418,43 @@ class Title extends React.Component {
           .filter(Boolean)
           .map((definition) => ({ label: definition.label, value: definition.type, nativeSourceType: definition.nativeSourceType }))
         const statuses = serialPayload?.data?.serial || serialPayload?.serial || []
+        this.applySerialDefaults(serialPayload?.data?.defaults || serialPayload?.defaults)
         this.setState({ dynamicSensors })
         this.props.onRuntimeDefinitionsLoaded?.()
         ;(Array.isArray(statuses) ? statuses : [statuses]).forEach(this.applySerialStatus)
       })
       .catch((error) => console.warn('[DisplaySystems] load failed', error))
   }
+
+  /** 只接收当前系统的默认参数，旧连接快照不能覆盖新系统的输入值。 */
+  applySerialDefaults = (defaults) => {
+    const systemId = this.props.systemId || this.props.matrixName;
+    if (defaults?.systemId !== systemId || !Number.isSafeInteger(defaults.baudRate) || defaults.baudRate <= 0) return;
+    this.setState({ serialDefaults: defaults });
+  };
+
+  /** 首次渲染即填入源型号默认值，宿主返回当前系统配置后以宿主为准。 */
+  getSerialDefaultBaudRate = () => this.state.serialDefaults?.baudRate
+    ?? getNativeSerialBaudDefault(resolveNativeSystemType(this.props.matrixName));
+
+  /** 原生连接可用固定五档，另保留宿主明确声明的旧设备默认值。 */
+  isSerialBaudRateValid = (value) => {
+    const rate = Number(value);
+    return /^\d+$/.test(String(value).trim()) && Number.isSafeInteger(rate) && rate > 0
+      && (SERIAL_DETECTION_BAUD_RATES.includes(rate) || rate === this.getSerialDefaultBaudRate());
+  };
+
+  /** 离焦提交输入，清空恢复系统默认；非法数值不用于打开串口。 */
+  commitSerialBaudRate = () => {
+    const draft = this.state.serialBaudRate;
+    if (draft === null) return;
+    if (!String(draft).trim()) {
+      this.setState({ serialBaudRate: String(this.getSerialDefaultBaudRate()) });
+    } else if (!this.isSerialBaudRateValid(draft)) {
+      message.warning(this.props.t('monitorUi.serialBaudInvalid'));
+      this.setState({ serialBaudRate: null });
+    } else this.setState({ serialBaudRate: String(Number(draft)) });
+  };
 
   /** 同步真实端口状态，失败/断开时清除连接选择，保留可见的失败原因。 */
   applySerialStatus = (status) => {
@@ -446,36 +484,156 @@ class Title extends React.Component {
   /** 在打开期间禁用重复选择，并给失败的通道显示错误边框。 */
   getSerialSelectProps = (role) => {
     const busy = this.state.serialPending[role] || this.state.serialStates[role]?.status === 'opening';
-    return { loading: Boolean(busy), disabled: Boolean(busy) || !canUseLicenseCapability(this.props.licenseAccess, 'canAcquire'), 'aria-busy': Boolean(busy),
+    return { loading: Boolean(busy), disabled: Boolean(busy) || this.isSerialConnectionLocked() || !canUseLicenseCapability(this.props.licenseAccess, 'canAcquire'), 'aria-busy': Boolean(busy),
       status: this.state.serialStates[role]?.error ? 'error' : undefined };
   }
 
-  /** 统一普通和 manifest 通道连接，等待真实 ACK 后再显示选中结果。 */
-  connectSerialChannel = async (role, path, { label, baudRate, hand } = {}) => {
+  /** 采集与收尾期间不能用临时探测串口打断数据来源。 */
+  isSerialConnectionLocked = () => this.props.colFlag === false || this.props.colWebFlag === true
+    || this.state.collectionStarting || ['collecting', 'finalizing'].includes(this.props.collectionSummary?.phase);
+
+  /** 取消探测或结果确认，迟到响应不再触发连接。 */
+  cancelSerialDetections = () => {
+    for (const operation of this._serialOperations?.values() || []) {
+      operation.controller?.abort();
+      operation.resolveConfirmation?.(false);
+    }
+    if (!this._portalUnmounted) this.setState({ serialDetectionDialog: null });
+  };
+
+  /** 结果弹窗只接受已经识别出的参数，不提供手动试错选项。 */
+  finishSerialDetectionDialog = (accepted = false) => {
+    const dialog = this.state.serialDetectionDialog;
+    if (!dialog) return;
+    if (!accepted) dialog.operation.controller.abort();
+    dialog.operation.resolveConfirmation?.(accepted);
+    this.setState({ serialDetectionDialog: null });
+  };
+
+  /** 展示识别证据；只有兼容的非默认结果提供连接按钮。 */
+  renderSerialDetectionDialog = () => {
+    const dialog = this.state.serialDetectionDialog;
+    if (!dialog) return null;
+    const { result, action, path } = dialog;
+    const t = this.props.t;
+    const messageKey = action === 'confirm' ? 'serialDetectionDifferent'
+      : result.status === 'ambiguous' ? 'serialDetectionAmbiguous'
+        : result.status === 'matched' ? 'serialDetectionIncompatible' : 'serialDetectionUnknown';
+    /** 内置协议使用界面语言，扩展协议保留目录提供的名称。 */
+    const protocolLabel = item => t(`monitorUi.serialProtocol_${item?.id}`, { defaultValue: item?.label || item?.id || '—' });
+    return <Modal open title={t('monitorUi.serialDetectionResult')}
+      onCancel={() => this.finishSerialDetectionDialog(false)}
+      footer={<Space><Button onClick={() => this.finishSerialDetectionDialog(false)}>{t('common.cancel')}</Button>
+        {action === 'confirm' && <Button type="primary" onClick={() => this.finishSerialDetectionDialog(true)}>{t('monitorUi.serialDetectionUseResult')}</Button>}
+      </Space>}>
+      <p>{t(`monitorUi.${messageKey}`)}</p>
+      <p>{t('monitorUi.serialDetectionPort')}: {path}</p>
+      {result.match && <>
+        <p>{t('monitorUi.serialDetectionBaud')}: {result.match.protocol?.baudRate}</p>
+        <p>{t('monitorUi.serialDetectionProtocol')}: {protocolLabel(result.match)}</p>
+      </>}
+      {result.candidates?.length > 0 && <p>{t('monitorUi.serialDetectionProtocol')}: {result.candidates.map(protocolLabel).join(' / ')}</p>}
+      {result.diagnostics?.attemptedBaudRates?.length > 0 && <p>{t('monitorUi.serialDetectionAttempted')}: {result.diagnostics.attemptedBaudRates.join(' / ')}</p>}
+    </Modal>;
+  };
+
+  /** 默认参数直接连接读取；当前连接两秒无有效帧才识别，差异结果确认后正式重连。 */
+  connectSerialChannel = async (role, path, { label, baudRate, hand, skipDetection = false } = {}) => {
+    if (this._portalLeaving) return false;
     if (!this.requireLicenseCapability('canAcquire')) return false;
+    if (this.isSerialConnectionLocked()) {
+      message.info(this.props.t('monitorUi.serialDetectionCollecting'));
+      return false;
+    }
+    if (this.props.history !== 'now') return false;
+    if (!skipDetection && baudRate == null && this.state.serialBaudRate !== null) {
+      if (!this.isSerialBaudRateValid(this.state.serialBaudRate)) {
+        message.warning(this.props.t('monitorUi.serialBaudInvalid'));
+        return false;
+      }
+      baudRate = Number(this.state.serialBaudRate);
+    }
     this._serialOperations ||= new Map();
-    if (this._serialOperations.has(role)) {
+    if (this._serialOperations.has(role) || (!skipDetection && [...this._serialOperations.values()].some(item => item.detecting))) {
       message.info(this.props.t('monitorUi.connectingWait'));
       return false;
     }
-    const operation = {};
-    const scope = this._portalScope;
-    this._serialOperations.set(role, operation);
-    serialFeedback.reset(role, path);
-    this.setState((state) => ({ serialPending: { ...state.serialPending, [role]: true } }));
-    try {
-      const ack = await commandClient.execute('serial.open', { role, path, ...(baudRate ? { baudRate } : {}) });
-      if (this._portalUnmounted || scope !== this._portalScope) return false;
-      const status = ack?.data?.serial?.find((item) => item.role === role);
-      this.applySerialStatus(status || { role, path, status: 'open', isOpen: true, updatedAt: Date.now() });
+    const connected = this.state.serialStates[role];
+    if (connected?.isOpen && connected.status === 'open' && connected.path === path
+      && (baudRate == null || connected.baudRate === baudRate)) {
       if (hand != null) {
         this.props.changeStateData?.({ hand });
         this.props.com?.current?.changeModal?.(hand);
       }
       return true;
+    }
+    const operation = { controller: new AbortController(), detecting: false };
+    const scope = this._portalScope;
+    /** 身份、采集状态或页面变化后，旧探测不得打开物理串口。 */
+    const isCurrent = () => !this._portalUnmounted && !this._portalLeaving && scope === this._portalScope
+      && !operation.controller.signal.aborted && this.props.history === 'now' && !this.isSerialConnectionLocked()
+      && canUseLicenseCapability(this.props.licenseAccess, 'canAcquire');
+    this._serialOperations.set(role, operation);
+    serialFeedback.reset(role, path);
+    /** 正式打开仍走原系统解析器；物理 ACK 到达即可显示串口并接收业务帧。 */
+    const openConnection = async (rate) => {
+      this.setState(state => ({ serialPending: { ...state.serialPending, [role]: 'opening' } }));
+      const ack = await commandClient.execute('serial.open', { role, path, ...(rate ? { baudRate: rate } : {}) });
+      if (!isCurrent()) return null;
+      const known = this.state.serialStates[role];
+      const status = ack?.data?.serial?.find(item => item.role === role)
+        || (known?.path === path && known.status === 'open' ? known : { role, path, status: 'open', isOpen: true, updatedAt: Date.now() });
+      this.applySerialStatus(status);
+      if (hand != null) {
+        this.props.changeStateData?.({ hand });
+        this.props.com?.current?.changeModal?.(hand);
+      }
+      return status;
+    };
+    try {
+      const opened = await openConnection(baudRate);
+      if (!opened || !isCurrent()) return false;
+      if (skipDetection) return true;
+      this.setState(state => ({ serialPending: { ...state.serialPending, [role]: 'waiting-data' } }));
+      const readiness = await waitForSerialConnectionData({ path, role, connectionId: opened.connectionId,
+        systemId: this.props.systemId || this.props.matrixName, signal: operation.controller.signal });
+      if (!isCurrent()) return false;
+      if (readiness !== 'no-data') return readiness !== 'changed';
+
+      operation.detecting = true;
+      this.setState(state => ({ serialPending: { ...state.serialPending, [role]: 'detecting' } }));
+      // ⚠️ 宿主按连接代次再次检查有效数据和采集状态，不能无条件关闭同角色的新连接。
+      const result = await detectSerialConnection({ path, sensorType: this.props.matrixName, role,
+        connectionId: opened.connectionId, signal: operation.controller.signal });
+      if (!isCurrent()) return false;
+      if (result.status === 'reading' || result.status === 'unsupported') return true;
+      this.setState(state => ({ serialDetections: { ...state.serialDetections, [role]: result } }));
+      const action = serialDetectionAction(result);
+      if (action === 'notice' || action === 'confirm') {
+        const accepted = await new Promise(resolve => {
+          operation.resolveConfirmation = resolve;
+          this.setState(state => ({ serialDetectionDialog: { role, path, label, result, action, operation },
+            serialPending: { ...state.serialPending, [role]: 'confirming' } }));
+        });
+        operation.resolveConfirmation = null;
+        if (!accepted || action !== 'confirm' || !isCurrent()) return false;
+      }
+      baudRate = Number(result.match.protocol.baudRate);
+      message.info(this.props.t('monitorUi.serialDetectedConnecting', { baudRate }));
+      operation.detecting = false;
+      const reconnected = await openConnection(baudRate);
+      if (!reconnected || !isCurrent()) return false;
+      this.setState({ serialBaudRate: String(baudRate) });
+      this.setState(state => ({ serialPending: { ...state.serialPending, [role]: 'waiting-data' } }));
+      const verified = await waitForSerialConnectionData({ path, role, connectionId: reconnected.connectionId,
+        systemId: this.props.systemId || this.props.matrixName, signal: operation.controller.signal });
+      if (!isCurrent()) return false;
+      if (verified === 'no-data') message.warning(this.props.t('monitorUi.serialDetectionNoDataAfterConnect'));
+      if (verified === 'changed') return false;
+      return true;
     } catch (error) {
       if (this._portalUnmounted || scope !== this._portalScope) return false;
-      if (error.code === 'SERIAL_CONNECT_CANCELLED') return false;
+      if (operation.controller.signal.aborted || error.name === 'AbortError' || error.code === 'SERIAL_CONNECT_CANCELLED') return false;
       serialFeedback.error(error, { role, path, label });
       // 同步拒绝（例如目标被占用）不会关闭原连接，保留仍然打开的旧通道。
       if (!this.state.serialStates[role]?.isOpen) {
@@ -496,10 +654,11 @@ class Title extends React.Component {
 
   /** 用 manifest 的标签和波特率打开动态通道。 */
   openManifestSerialChannel = (sensor, path) => this.connectSerialChannel(sensor.serialRole, path,
-    { label: sensor.sensorLabel, baudRate: sensor.baudRate });
+    { label: sensor.sensorLabel, baudRate: sensor.baudRate, skipDetection: true });
 
   /** 关闭指定通道并等待资源释放，失败时保留状态供用户检查。 */
   closeManifestSerialChannels = async (sensors) => {
+    this.cancelSerialDetections();
     const roles = [...new Set(sensors.map((sensor) => sensor.serialRole).filter(Boolean))]
     if (!roles.length) return
     const scope = this._portalScope;
@@ -560,6 +719,7 @@ class Title extends React.Component {
 
   componentWillUnmount() {
     this._portalUnmounted = true;
+    this.cancelSerialDetections();
     this._csvActive = false;
     this._csvBatch?.dispose();
     this._csvBatch = null;
@@ -568,7 +728,14 @@ class Title extends React.Component {
     window.removeEventListener('shroom-serial-status', this.handleSerialStatus)
   }
 
-  componentDidUpdate(prevProps) {
+  componentDidUpdate(prevProps, prevState) {
+    if (prevProps.history !== this.props.history || (prevProps.wsConnected && !this.props.wsConnected)
+      || (canUseLicenseCapability(prevProps.licenseAccess, 'canAcquire') && !canUseLicenseCapability(this.props.licenseAccess, 'canAcquire'))
+      || (prevState && !prevState.collectionStarting && this.state.collectionStarting)
+      || (prevProps.colFlag !== false && this.props.colFlag === false)
+      || (prevProps.collectionSummary?.phase !== this.props.collectionSummary?.phase && this.isSerialConnectionLocked())) {
+      this.cancelSerialDetections();
+    }
     if (this.props.calibration && (prevProps.matrixName !== this.props.matrixName
       || prevProps.numMatrixFlag !== this.props.numMatrixFlag)) {
       this.closeGloveCalibration();
@@ -578,7 +745,8 @@ class Title extends React.Component {
       && prevProps.hand !== this.props.hand && this.props.matrixName === 'hand0205') {
       this.previewGloveCalibration(this.props.hand ? 'left' : 'right', this.state.fingerIndex);
     }
-    if (prevProps.matrixName !== this.props.matrixName) {
+    if (prevProps.matrixName !== this.props.matrixName || prevProps.systemId !== this.props.systemId) {
+      this.cancelSerialDetections();
       this._portalScope = {};
       this._serialOperations?.clear();
       this._collectionStarting = null;
@@ -586,11 +754,12 @@ class Title extends React.Component {
       this._csvStarting = false;
       this._csvBatch?.dispose();
       this._csvBatch = null;
-      this.setState({ serialPending: {}, serialStates: {}, manifestPortSelections: {}, collectionStarting: false, collectionModalOpen: false,
+      this.setState({ serialPending: {}, serialStates: {}, serialDefaults: null, serialBaudRate: null, serialDetections: {}, serialDetectionDialog: null, manifestPortSelections: {}, collectionStarting: false, collectionModalOpen: false,
         portalPlaybackValue: '', portalDownloadValues: [], portalPlaybackOpen: false,
         portalSpecialOpen: false, portalToolsOpen: false,
         portalBusy: false, portalError: '', dataTime: '', csvBatchDates: [], csvDownloadModalOpen: false,
         csvDownloadStage: 'config', csvBatchCompleted: 0, csvBatchFailures: [] });
+      this.loadDynamicSensors();
     }
     if (prevProps.matrixName !== this.props.matrixName && this.props.matrixName === 'humanBody') {
       this.setState({
@@ -668,6 +837,7 @@ class Title extends React.Component {
 
 
   onClick = (e) => {
+    this.cancelSerialDetections();
     console.log('click ', e.key);
     this.props.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 })
     if (this.props.matrixName === 'foot') { this.props.track.current?.canvasInit() }
@@ -2137,8 +2307,26 @@ class Title extends React.Component {
     } catch (error) { if (isCurrent()) message.error(this.props.t('monitorUi.zeroFailed', { value0: error.message })); }
   };
 
+  /** 退出开始即废弃在途载入/切换的后续步骤，防止迟到回执重新启动回放。 */
+  beginPortalExit = () => {
+    this._portalLeaving = true;
+    this._portalScope = {};
+    this.cancelSerialDetections();
+    this._collectionStarting = null;
+    this._csvStarting = false;
+    this._csvActive = false;
+    this._csvBatch?.dispose();
+    this._csvBatch = null;
+    this.closePortalPanelsForScene();
+    this.setState({ portalBusy: false, collectionStarting: false, serialPending: {}, csvDownloadStage: 'config' });
+  };
+
+  /** 退出失败允许在原页面继续操作；此前的异步操作保持失效。 */
+  cancelPortalExit = () => { this._portalLeaving = false; };
+
   /** 新会话栏等待模式命令成功后才改界面；回放期间仍使用原播放条。 */
   changePortalMode = async (mode) => {
+    if (this._portalLeaving) return;
     if (mode === 'now' && !this.requireLicenseCapability('canAcquire')) return;
     if (this.state.portalBusy || this.state.csvDownloadStage === 'exporting') return;
     if (mode !== 'now' && (this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag)) {
@@ -2146,6 +2334,7 @@ class Title extends React.Component {
       return;
     }
     if (mode === 'now' && this.props.history === 'now') return;
+    this.cancelSerialDetections();
     const isCurrent = capturePortalOperation(this);
     const switching = this.props.history !== mode;
     this.setState({ portalBusy: true, portalError: '',
@@ -2153,8 +2342,11 @@ class Title extends React.Component {
     try {
       if (switching) await commandClient.execute('playback.control', { play: false });
       if (!isCurrent()) return;
-      if (!await executePortalLegacyControl(commandClient,
-        this.withSmallBed12BDisplayOptions({ local: mode !== 'now', history: false }), isCurrent)) return;
+      const { smallBed12BDisplayOptions: displayOptions } = this.withSmallBed12BDisplayOptions();
+      // ⚠️ 清历史聚合同时明确暂停；拆成两条命令会误拦只允许查看历史的许可。
+      await commandClient.execute('history.mode', { local: mode !== 'now', history: false, play: false,
+        ...(displayOptions ? { displayOptions } : {}) });
+      if (!isCurrent()) return;
       if (switching) {
         this.props.onPortalResetPlayback?.();
         this.props.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
@@ -2174,7 +2366,7 @@ class Title extends React.Component {
 
   /** 载入单选记录后显示首帧并启动播放；每次等待后检查页面是否仍有效。 */
   loadPortalPlayback = async (value) => {
-    if (this.state.portalBusy || !this.props.dataArr?.some((record) => record.value === value)) return;
+    if (this._portalLeaving || this.state.portalBusy || !this.props.dataArr?.some((record) => record.value === value)) return;
     const system = this.props.matrixName;
     const isCurrent = capturePortalOperation(this);
     this.setState({ portalBusy: true, portalError: '' });
@@ -2212,7 +2404,7 @@ class Title extends React.Component {
 
   /** 只删除单选记录，先明确确认；下载勾选绝不作为删除目标。 */
   deletePortalHistory = (value) => {
-    if (this.state.portalBusy || !this.props.dataArr?.some((record) => record.value === value)) return;
+    if (this._portalLeaving || this.state.portalBusy || !this.props.dataArr?.some((record) => record.value === value)) return;
     const isCurrent = capturePortalOperation(this);
     Modal.confirm({ title: this.props.t('monitorUi.deleteRecordQuestion'), content: this.props.t('monitorUi.deleteRecordConfirmation', { value0: value }),
       okText: this.props.t('monitorUi.confirmDelete'), cancelText: this.props.t('monitorUi.cancel'), okButtonProps: { danger: true },
@@ -2368,16 +2560,15 @@ class Title extends React.Component {
       connected={this.props.wsConnected} connectionEpoch={this.props.wsConnectionEpoch}
       history={this.props.history} collecting={!this.props.colFlag} canAcquire={canAcquire} /> : null;
     // console.log('title')
-    const baudControl = <>
-        {
-          this.props.matrixName.includes('fast') || this.props.matrixName == 'normalFast' || this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' || this.props.matrixName == 'bed1616' || this.props.matrixName == 'fast256' || this.props.matrixName == 'footVideo256' || this.props.matrixName == 'daliegu' || this.props.matrixName == 'smallSample' ? <Input placeholder={t('enterBaudRate')} onChange={(e) => {
-            const value = e.target.value
-            this.props.wsSendObj({
-              baudRate: value
-            })
-          }} /> : ''
-        }
-    </>;
+    const baudControl = this.props.history === 'now' && this.props.matrixName !== 'localCar' && !manifestSerialSensors.length
+      ? <Input className="serial-baud-input" aria-label={t('monitorUi.serialBaudRate')}
+        inputMode="numeric" pattern="[0-9]*" autoComplete="off"
+        value={this.state.serialBaudRate ?? this.getSerialDefaultBaudRate()}
+        title={t('monitorUi.serialBaudNextConnection')}
+        disabled={!canAcquire || this.isSerialConnectionLocked() || Object.values(this.state.serialPending).some(Boolean)
+          || Object.values(this.state.serialStates).some(status => status.status === 'opening')}
+        onChange={event => this.setState({ serialBaudRate: event.target.value })}
+        onBlur={this.commitSerialBaudRate} onPressEnter={event => event.target.blur()} /> : null;
     const serialControls = <>
         {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? manifestSerialSensors.length ? <>
           {manifestSerialSensors.map((sensor) => (
@@ -2517,12 +2708,26 @@ class Title extends React.Component {
         }
     </>;
     const serialStatusControls = this.props.history === 'now' ? <div className="serial-connection-status" role="status" aria-live="polite">
+      {Object.entries(this.state.serialPending).filter(([, stage]) => ['waiting-data', 'detecting', 'confirming'].includes(stage))
+        .map(([role, stage]) => stage === 'waiting-data'
+          ? <SerialReadingNotice key={`reading-${role}`}><span>
+            {t('monitorUi.serialDetectionReading')}
+            <Button size="small" type="text" onClick={this.cancelSerialDetections}>{t('common.cancel')}</Button>
+          </span></SerialReadingNotice>
+          : <span key={`detect-${role}`}>
+            {t(stage === 'detecting' ? 'monitorUi.serialDetectionFallback' : 'monitorUi.serialDetectionWaiting')}
+            <Button size="small" type="text" onClick={this.cancelSerialDetections}>{t('common.cancel')}</Button>
+          </span>)}
       {Object.values(this.state.serialStates).filter((status) => status.error || status.status === 'opening')
-        .map((status) => <span key={status.role} className={status.error ? 'is-error' : ''}>
-          {serialErrorText(status.error || { message: status.retryAttempt ? this.props.t('monitorUi.reconnecting') : this.props.t('monitorUi.connecting') }, {
-            ...status, label: manifestSerialSensors.find((sensor) => sensor.serialRole === status.role)?.sensorLabel,
-          })}
-        </span>)}
+        .map((status) => {
+          const notice = <span className={status.error ? 'is-error' : ''}>
+            {serialErrorText(status.error || { message: status.retryAttempt ? this.props.t('monitorUi.reconnecting') : this.props.t('monitorUi.connecting') }, {
+              ...status, label: manifestSerialSensors.find((sensor) => sensor.serialRole === status.role)?.sensorLabel,
+            })}
+          </span>;
+          return status.error ? <React.Fragment key={status.role}>{notice}</React.Fragment>
+            : <SerialReadingNotice key={`opening-${status.role}-${status.connectionId || status.path}`}>{notice}</SerialReadingNotice>;
+        })}
     </div> : null;
     const displayControls = <>
         {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.props.matrixName) ?
@@ -3011,6 +3216,7 @@ class Title extends React.Component {
     </>;
 
     return <div className={`title${this.props.portalEmbedded ? ' portal-session-title' : ''}`}>
+      {this.renderSerialDetectionDialog()}
       <WorkspaceViewPersistence rendererRef={this.props.com} systemId={this.props.systemId} sensorType={this.props.matrixName}
         mode={this.props.numMatrixFlag} history={this.props.history} />
       {this.props.portalEmbedded ? <PortalSessionBar
@@ -3042,7 +3248,7 @@ class Title extends React.Component {
             <PortalRendererControls rendererRef={this.props.com} />
             <fieldset className="portal-display-native"><legend>{this.props.t('monitorUi.displayRegion')}</legend>{displayControls}{carControls}{partControls}</fieldset>
             {isCalibratableGlove && <fieldset className="portal-glove-controls"><legend>{t('deviceCal')}</legend>{calibrationControls}</fieldset>}
-            {Boolean(baudControl.props.children) && <fieldset><legend>{this.props.t('monitorUi.serialSettings')}</legend>{baudControl}</fieldset>}
+            {baudControl && <fieldset><legend>{this.props.t('monitorUi.serialSettings')}</legend>{baudControl}</fieldset>}
           </PortalDisplayPanel>
           {jqbedConfigAccess.visible && <Tooltip title={t(jqbedConfigAccess.tooltipKey)}>
             <Button className="portal-bed-settings" icon={<SettingOutlined />}

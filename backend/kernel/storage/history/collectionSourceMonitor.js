@@ -100,6 +100,20 @@ function createCollectionSourceMonitor({ channelBus, getContext, onStatus = () =
   /** Return a fresh source snapshot; callers cannot mutate the monitor's saved state. */
   function status() { return refresh(); }
 
+  /** 只读取指定物理连接代次收到的真实业务帧，其他通道或旧连接不能证明其就绪。 */
+  function connectionStatus(role, expectedConnectionKey) {
+    refresh();
+    const source = context(), entry = received.get(role);
+    if (disposed || !expectedConnectionKey || !source.connected || source.playback || !source.systemId
+      || source.systemId !== systemId || !source.roles.includes(role)
+      || connectionKey(source, role) !== expectedConnectionKey || entry?.connectionKey !== expectedConnectionKey) {
+      return { ready: false, lastFrameAgeMs: null };
+    }
+    const age = now() - entry.lastFrameAt;
+    if (!Number.isFinite(age) || age < 0) return { ready: false, lastFrameAgeMs: null };
+    return { ready: age < timeoutMs, lastFrameAgeMs: age };
+  }
+
   const unsubscribe = channelBus.subscribe('*', refresh);
   const timer = schedule(() => refresh(), Math.min(1000, timeoutMs));
   timer?.unref?.();
@@ -114,7 +128,7 @@ function createCollectionSourceMonitor({ channelBus, getContext, onStatus = () =
     current = { ...current, ready: false, connected: false, code: 'COLLECTION_DEVICE_NOT_CONNECTED', lastFrameAgeMs: null };
   }
 
-  return { status, refresh, dispose };
+  return { status, connectionStatus, refresh, dispose };
 }
 
 module.exports = { createCollectionSourceMonitor };

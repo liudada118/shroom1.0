@@ -171,8 +171,13 @@ function createSerialPortOrchestrator({
    */
   function openManagedSerialPort(role, options = {}) {
     beforeOpen?.();
+    const baudRate = Number(options.baudRate);
+    if (!Number.isSafeInteger(baudRate) || baudRate <= 0) {
+      throw Object.assign(new Error('serial baudRate must be a positive integer'), { code: 'INVALID_COMMAND', httpStatus: 400 });
+    }
     serialManager.registerPort(role, {
       ...options,
+      baudRate,
       role,
       reconnect: options.reconnect === true,
     });
@@ -209,15 +214,16 @@ function createSerialPortOrchestrator({
    *
    * @param {string} portPath 串口设备路径（如 COM3 / /dev/ttyUSB0）。
    * @param {string} [reason] 日志前缀。
+   * @param {object} [options] 可用 baudRate 覆盖该连接的默认波特率。
    * @returns {object|null} SerialPort 实例；路径为空时 null。
    */
-  function openSitSerialPort(portPath, reason = 'open sit') {
+  function openSitSerialPort(portPath, reason = 'open sit', options = {}) {
     if (!portPath) return null;
     const sensorType = getSensorType();
     const configured = getConfiguredChannel(serialRoles.SIT);
     return openManagedSerialPort(serialRoles.SIT, {
       path: portPath,
-      baudRate: configured?.baudRate || getBaudRate(),
+      baudRate: options.baudRate ?? configured?.baudRate ?? getBaudRate(),
       protocol: configured?.protocol,
       reconnect: true,
       parserChannel: configured?.parserChannel || (sensorType === 'bigBed'
@@ -242,9 +248,10 @@ function createSerialPortOrchestrator({
    *
    * @param {string} portPath 串口设备路径。
    * @param {string} [reason] 日志前缀。
+   * @param {object} [options] 可用 baudRate 覆盖该连接的默认波特率。
    * @returns {object|null} SerialPort 实例；路径为空时 null。
    */
-  function openBackSerialPort(portPath, reason = 'open back') {
+  function openBackSerialPort(portPath, reason = 'open back', options = {}) {
     if (!portPath) return null;
     const useRawMinzhenText = getSensorType() === minzhenType;
     const configured = getConfiguredChannel(serialRoles.BACK);
@@ -253,7 +260,7 @@ function createSerialPortOrchestrator({
     }
     return openManagedSerialPort(serialRoles.BACK, {
       path: portPath,
-      baudRate: configured?.baudRate || getBaudRate(),
+      baudRate: options.baudRate ?? configured?.baudRate ?? getBaudRate(),
       protocol: useRawMinzhenText ? undefined : configured?.protocol,
       reconnect: true,
       parserChannel: useRawMinzhenText
@@ -275,14 +282,15 @@ function createSerialPortOrchestrator({
    *
    * @param {string} portPath 串口设备路径。
    * @param {string} [reason] 日志前缀。
+   * @param {object} [options] 可用 baudRate 覆盖该连接的默认波特率。
    * @returns {object|null} SerialPort 实例；路径为空时 null。
    */
-  function openHeadSerialPort(portPath, reason = 'open head') {
+  function openHeadSerialPort(portPath, reason = 'open head', options = {}) {
     if (!portPath) return null;
     const configured = getConfiguredChannel(serialRoles.HEAD);
     return openManagedSerialPort(serialRoles.HEAD, {
       path: portPath,
-      baudRate: configured?.baudRate || getBaudRate(),
+      baudRate: options.baudRate ?? configured?.baudRate ?? getBaudRate(),
       protocol: configured?.protocol,
       reconnect: true,
       parserChannel: configured?.parserChannel || serialParserManager.channels.HEAD,
@@ -296,7 +304,7 @@ function createSerialPortOrchestrator({
    * 角色与协议由展示系统配置决定；找不到声明时拒绝猜测波特率或 parser，
    * 避免把同波特率的不同设备错误映射到一起。
    */
-  function openManifestSerialPort(serialRole, portPath, reason = 'open manifest channel') {
+  function openManifestSerialPort(serialRole, portPath, reason = 'open manifest channel', options = {}) {
     if (!portPath || !serialRole) return null;
     const configured = getManifestSerialChannel(serialRole);
     if (!configured) {
@@ -306,7 +314,7 @@ function createSerialPortOrchestrator({
 
     return openManagedSerialPort(serialRole, {
       path: portPath,
-      baudRate: configured.baudRate,
+      baudRate: options.baudRate ?? configured.baudRate,
       protocol: configured.protocol,
       reconnect: true,
       parserChannel: configured.parserChannel,
@@ -318,7 +326,7 @@ function createSerialPortOrchestrator({
    * 原子校验一批 manifest 串口后再逐路打开。
    * 未声明角色会在任何硬件动作前失败；同步打开异常时关闭本批已启动角色。
    */
-  function openManifestSerialPorts(channelPorts = {}, reason = 'open manifest channels') {
+  function openManifestSerialPorts(channelPorts = {}, reason = 'open manifest channels', options = {}) {
     const entries = Object.entries(channelPorts || {})
       .filter(([serialRole, portPath]) => serialRole && portPath != null);
     const invalidEntry = entries.find(([serialRole]) => !getManifestSerialChannel(serialRole));
@@ -329,7 +337,7 @@ function createSerialPortOrchestrator({
       return entries.map(([serialRole, portPath]) => {
         const previous = serialManager.getEntry?.(serialRole);
         try {
-          const port = openManifestSerialPort(serialRole, portPath, `${reason} ${serialRole}`);
+          const port = openManifestSerialPort(serialRole, portPath, `${reason} ${serialRole}`, options);
           if (!port) throw createInvalidSerialRoleError(serialRole);
           if (!previous || serialManager.getEntry?.(serialRole) !== previous) rollbackRoles.push(serialRole);
           return port;

@@ -1,9 +1,29 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-31
+> 最后更新于：2026-11-03
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
+2026-11-03 默认数字首屏预填：旧宿主未提供 `serial.status.defaults` 时，`serialBaudDefaults` 按源型号立即预填实际输入值，不再依赖“系统默认”占位；新宿主配置优先。兜底仅用于显示，未编辑仍不覆盖宿主连接参数；客户端测试逐项对照生产注册表防止默认值漂移。验证 Standard 与旧接口浏览器场景。
+
+2026-11-03 波特率输入：`serial.status.defaults` 经 `server.readSerialDefaults` 返回当前系统身份/源型号/主通道默认波特率；`Title` 替换冗长识别说明为预填输入框，手动值仅传本次 `serial.open`，切系统清除并重取默认，不用旧连接记录猜默认。未编辑继续用宿主各通道默认，manifest独立配置保留。验证 serialConnectionApi / Title.serialConnection / serial-detection-portal 与 Full。
+
+2026-11-03 首次进入提示补齐：`Title` 的原生 `opening` 提示也经 `SerialReadingNotice` 延迟两秒，真实错误立即显示；`title.scss` 仅错误使用红色提示框。`LicensePortal` 在打开系统列表时预载 Home，仍在系统切换回执成功后挂载，保留画布就绪和入场交接。验证 Standard 与 `serial-detection-portal.mjs`，未改后台切换、授权或设备读数。
+
+2026-11-03 读取提示延迟：`Title` 的 waiting-data 提示交给 `SerialReadingNotice` 挂载两秒后显示，快速读取完成即卸载，取消/切换阶段清理计时器；正式读取和无数据识别时序保持原样。仅显示行为，验证 Standard 与 `serial-detection-portal.mjs`。
+
+2026-11-03 默认串口优先读取（当前连接流程）：`Title` 先按系统默认协议/波特率执行正式 `serial.open` 并接收业务帧；`serialConnectionDetection.waitForSerialConnectionData` 读取 `/api/collection/status.serialDataStatus`，当前连接两秒明确无有效数据才探测。探测携带connectionId，由宿主原子核对身份/采集/有效帧，数据恢复则保留连接，无数据才等待关闭后识别；识别重开再次验数据且不循环探测。取代下文同日先识别再连接的阶段流程。验证入口 Title.serialConnection / serialConnectionDetection / collectionSourceMonitor / serialProtocolProbeService / serialProtocolDetectApi、真实页面 `serial-detection-portal.mjs` 与 Full。
+
+2026-11-03 回放退出与重进：`Home.preparePortalExit` 在采集收尾后经 `services/playbackExit` 等待暂停ACK；`Title.beginPortalExit` 立即作废旧操作作用域，迟到载入不再启动播放。`serialControlService` 的成功 `sensor.switch` 清除 localFlag/history/playFlag，同系统重进也回实时待连接；拒绝切换不改状态，历史专用许可仍可主动查看回放。验证 Home.collection / Title.portalLifecycle / playbackExit / serialControlService / collection-exit-portal 和 Full。
+
+2026-11-03 默认波特率与连接识别：fast256 的 registry/session 默认统一921600。`Title` → `serialConnectionDetection` → `serialProtocolProbeService` / `nativeSerialDetection` 在业务连接前按默认优先、固定五档识别原生矩阵及分包手套；唯一兼容默认结果直接连接，其他波特率确认后连接，未知/歧义/不兼容仅提示。临时探测不入采集，关闭未确认前保留COM占用；显式serial.open baud透传到物理端口且不污染全局默认。验证入口 serialProtocolProbeService / serialProtocolDetectApi / Title.serialConnection / serial-detection-portal 与 Full，边界见架构同日台账。
+
 源码版本1.1.44（2026-10-30）：根package与锁文件同步由1.1.43递增，用户说明见 `release-notes/windows/1.1.44.md`，汇总本轮诊断、显示调节、回执和入口修复；版本提交不代表安装包已生成或线上更新已发布。
+
+2026-11-03 交付包验收：`npm run verify:release -- --app-dir <应用目录>` 检查目标ASAR/前端身份，并用目标生产模块验证模拟串口→HTTP采集→SQLite→回放/CSV，另检查实际编译网页的64×64点图和公司目录竞态。报告区分已执行与未覆盖；不启动正式Electron、不安装软件、不访问真实授权。`portalCompanySync` 按语义授权上下文维护请求，修复重复快照取消同步及旧空目录覆盖成功结果。使用与边界见 [打包后自动验收](docs/release-acceptance.md)；涉及采集、授权与产物使用Full。
+
+同日扩充模拟设备：`matrix-device-fixtures.cjs` 为手部hand、小床12B32×32及16×16四采样点提供独立字节/期望值；`glove-workflow.cjs` 验证hand0205单左/单右和hand0205Double双串口分包、姿态及左右分表。初次覆盖11配置、57阶段；随后加入fast256普通/手套分包，扩至13配置、67阶段、70帧/48,640压力值和80手套存储姿态值。限测试进程内部串口，不新增系统COM口，12B独立采集降采样及手套其他协议覆盖范围见验收说明。
+
+同日16×16高速缺数据：`client/src/displays/registry.js` 补齐fast256定义，修复Home在定义缺失时提前丢帧；不放松身份检查。`historyPlaybackService` 清屏由1024改为256点。`fast256-page.mjs` 接收模拟分包/实际SQLite回放产出的帧，在实际编译门户逐点核对256个GPU数字及侧栏；旧页全0负例、新页10帧通过。手套使用921600而fast256默认1000000，实体使用仍需匹配，不能以模拟字节验收证明波特率正确。
 
 2026-10-31 64×64高速回放：`historyPlaybackService.buildZeroPlaybackFrame` 为 `bed4096` / `bed4096num` 生成4096点清屏；`4096.jsx.sitData` 拒收长度或有限数值校验不通过的帧，避免NaN永久污染平滑缓存。正常采集、历史和CSV取数保持完整4096点。验证入口 `playbackFrameService.test.js` / `serverHistoryLoader.test.js` / `scripts/tests/fast64-replay-home.mjs`，涉及回放使用Full；异机故障记录尚未读取。
 

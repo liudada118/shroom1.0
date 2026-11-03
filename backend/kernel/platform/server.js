@@ -33,6 +33,7 @@ const {
   registerCalibrationZeroCommandHandler,
 } = require('./commands/registerCalibrationZeroCommandHandler');
 const { registerSerialControlHandlers } = require('../serial/serialControlService');
+const { getNativeDetectionConfig } = require('../serial/nativeSerialDetection');
 const { createControlCommandService } = require('./commands/controlCommandService');
 const { createAgentDeviceConnectionService } = require('./commands/agentDeviceConnectionService');
 const { createHttpApp } = require('./http/httpAppFactory');
@@ -1419,12 +1420,30 @@ function readRuntimeVersions() {
     ...(managedSystemSync.getServerPolicy?.()?.policyVersion ? { serverContractVersion: String(managedSystemSync.getServerPolicy().policyVersion) } : {}) };
 }
 
+/** 读取当前系统的串口默认值；旧连接登记不能决定新系统的默认参数。 */
+function readSerialDefaults() {
+  const sensorType = runtimeContext.getSensorType();
+  const systemId = zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(sensorType);
+  const baudRate = appRuntime.displaySystems.getSerialConfig(sensorType, 'sit')?.baudRate ?? getSensorBaudRate(sensorType);
+  return { systemId, sensorType, baudRate };
+}
+
 /** Return the current collection, or the last crash-recovered result after a restart. */
 function readCollectionStatus() {
   const collectionSourceStatus = collectionSourceMonitor?.status() || null;
   const current = collectionSessions.current();
   const recent = collectionSessions.list({ limit: 10 });
-  return { collectionSummary: current || recent[0] || null, current, recent, collectionSourceStatus };
+  const sensorType = runtimeContext.getSensorType();
+  const serialDataStatus = serialManager.getStatus().map(status => {
+    const role = status.role || status.portId;
+    const isOpen = status.status === 'open' && status.isOpen === true;
+    const data = isOpen && status.connectionId != null
+      ? collectionSourceMonitor?.connectionStatus(role, JSON.stringify(['serial', status.connectionId])) : null;
+    return { role, path: status.path || null, connectionId: status.connectionId ?? null, isOpen,
+      ready: data?.ready === true, lastFrameAgeMs: data?.lastFrameAgeMs ?? null,
+      detectionSupported: Boolean(getNativeDetectionConfig({ sensorType, role })) };
+  });
+  return { collectionSummary: current || recent[0] || null, current, recent, collectionSourceStatus, serialDataStatus };
 }
 
 const defauleFile = 'hand0205';
@@ -1577,8 +1596,18 @@ const {
   setSerialPortState,
 } = serialRuntime;
 
+/** 采集与尾帧落库期间拒绝重开串口，避免一条记录混入两套串口配置。 */
+function requireSerialConfigurationIdle() {
+  if (getCollectionState('flag') || collectionSessions.current()?.phase === 'finalizing') {
+    throw Object.assign(new Error('请先停止采集，再调整串口连接。'), { code: 'COLLECTION_ACTIVE', httpStatus: 409 });
+  }
+}
+
 const serialPortOrchestrator = createSerialPortOrchestrator({
-  beforeOpen: () => halowService?.requireSerialAvailable(),
+  beforeOpen: () => {
+    requireSerialConfigurationIdle();
+    halowService?.requireSerialAvailable();
+  },
   getBaudRate: runtimeContext.getBaudRate,
   getSerialConfig: appRuntime.displaySystems.getSerialConfig,
   getSensorType: runtimeContext.getSensorType,
@@ -2290,6 +2319,7 @@ registerRuntimeCommandHandlers(controlCommandRouter, {
 
 registerSerialControlHandlers(controlCommandRouter, {
   requireAccess: licenseAccess.requireAccess,
+  requireSerialConfigurationIdle,
   HAND_GLOVE_DOUBLE,
   resetHandPacketRuntime: (options) => handPacketRuntime.reset(options),
   releasePreviousDatabases: () => {
@@ -2892,6 +2922,7 @@ const managedGrantTimer = setInterval(enforceManagedSystemGrant, 60000);
 managedGrantTimer.unref?.();
 
 const httpApp = createHttpApp({
+  getCurrentSensorType: () => runtimeContext.getSensorType(),
   requireAccess: licenseAccess.requireAccess,
   getLicenseAccess: licenseAccess.read,
   getCollectionStatus: readCollectionStatus,
@@ -2931,6 +2962,7 @@ const httpApp = createHttpApp({
   getPort,
   getRealtimeChannels,
   getSerialStatus: () => serialManager.getStatus(),
+  getSerialDefaults: readSerialDefaults,
   getSitDb: () => runtimeContext.getDatabase('sit'),
   getWsSubscriptionStatus,
   imgPath,

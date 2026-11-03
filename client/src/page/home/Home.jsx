@@ -4,6 +4,7 @@ import { readTuningConfig, hasExplicitTuningValue, normalizeDisplayTuning } from
 import { readLicenseAccess, isHistoryOnlyLicense, canUseLicenseCapability, getLicenseExpiryTimestamp } from '../../services/licenseAccess';
 import { readCollectionSummary } from '../../services/collectionStatus';
 import { finishCollectionBeforeExit } from '../../services/collectionExit';
+import { stopPlaybackBeforeExit } from '../../services/playbackExit';
 import { requestJson } from '../../extensions/display-system/api';
 import RuntimeStatusNotice from './RuntimeStatusNotice';
 import { sendWebSocketJson } from './websocketTransport';
@@ -4810,17 +4811,24 @@ class Home extends React.Component {
     this._collecting = collecting;
   };
 
-  /** 门户退出先停止接收并等待尾帧保存；失败保留当前页面以便再次退出。 */
+  /** 门户退出等待采集保存和回放暂停；失败留页重试，不在卸载后补发命令。 */
   preparePortalExit = async ({ signal } = {}) => {
     if (signal?.aborted) throw signal.reason || new DOMException('退出已取消', 'AbortError');
-    if (this.state.matrixName === 'localCar') {
-      await new Promise(resolve => this.setState({ colWebFlag: false }, resolve));
+    this.title.current?.beginPortalExit?.();
+    try {
+      if (this.state.matrixName === 'localCar') {
+        await new Promise(resolve => this.setState({ colWebFlag: false }, resolve));
+      } else {
+        await finishCollectionBeforeExit({ signal, onSummary: this.applyCollectionSummary });
+        await stopPlaybackBeforeExit({ signal });
+      }
       this.setColValueFlag(false);
-      return;
+      this.progress.current?.resetPlay();
+      this.setState({ colFlag: true, playflag: false });
+    } catch (error) {
+      this.title.current?.cancelPortalExit?.();
+      throw error;
     }
-    await finishCollectionBeforeExit({ signal, onSummary: this.applyCollectionSummary });
-    this.setColValueFlag(false);
-    this.setState({ colFlag: true });
   };
 
   /**

@@ -84,6 +84,13 @@ function createSerialParserManager({
     return port.pipe(getParser(channel));
   }
 
+  /** 丢弃旧连接未完成的帧，保留当前通道的业务订阅。 */
+  function reset(channel) {
+    const parser = getParser(channel);
+    if (parser instanceof FixedLengthParser) parser.pending = Buffer.alloc(0);
+    else if (parser instanceof DelimiterParser) parser.buffer = Buffer.alloc(0);
+  }
+
   function pipeSit(port, sensorType, { smallBed12BType }) {
     return port.pipe(getSitParser(sensorType, { smallBed12BType }));
   }
@@ -107,6 +114,7 @@ function createSerialParserManager({
     pipe,
     pipeSit,
     registerChannel,
+    reset,
   };
 }
 

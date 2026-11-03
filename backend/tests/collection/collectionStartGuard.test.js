@@ -20,14 +20,15 @@ const { createCollectionSessionService } = require('../../kernel/storage/history
 const { createCollectionSourceMonitor } = require('../../kernel/storage/history/collectionSourceMonitor');
 const { createChannelBus } = require('@shroom/backend/telemetry/channelBus.js');
 const { subscribeBusinessEvents } = require('../../common/businessEvents');
+const { getNativeDetectionConfig } = require('../../kernel/serial/nativeSerialDetection');
 
 /** 使用真实组合根的连接读取回调，避免测试另写一套角色选择规则。 */
-function productionSourceReader(context) {
+function productionSourceReader(context, functionName = 'readCollectionSourceContext') {
   const filename = path.resolve(__dirname, '../../kernel/platform/server.js');
   const source = fs.readFileSync(filename, 'utf8');
   const acorn = createRequire(path.resolve(__dirname, '../../../client/package.json'))('acorn');
   const reader = acorn.parse(source, { ecmaVersion: 'latest' }).body
-    .find(node => node.type === 'FunctionDeclaration' && node.id.name === 'readCollectionSourceContext');
+    .find(node => node.type === 'FunctionDeclaration' && node.id.name === functionName);
   return vm.runInNewContext(`(${source.slice(reader.start, reader.end)})`, context);
 }
 
@@ -56,6 +57,8 @@ async function fixture(t) {
   const monitor = createCollectionSourceMonitor({ channelBus, getContext, now: () => context.now,
     schedule: () => ({ unref() {} }), unschedule() {},
     onUnavailable: () => { state.flag = false; journal.finish('DATA_STREAM_TIMEOUT'); } });
+  const readStatus = productionSourceReader({ collectionSourceMonitor: monitor, collectionSessions: journal,
+    serialManager: manager, runtimeContext: { getSensorType: () => context.type }, getNativeDetectionConfig }, 'readCollectionStatus');
   const router = createControlCommandRouter();
   registerRuntimeCommandHandlers(router, { getRuntime: () => state, setRuntime: patch => Object.assign(state, patch),
     getCollectionSource: monitor.status, requireAccess() {}, normalizeCollectFrequency, normalizeCollectOptions,
@@ -92,7 +95,7 @@ async function fixture(t) {
     channelBus.publish(`${context.type}:${role}`, { type: 'sensor.frame', source: 'realtime', displaySystemId: context.type,
       channelId: `${context.type}:${role}`, sensorId: role, outputChannel: role, payload: { value: values } });
   }
-  return { command, commands, manager, journal, opening, context, state, effects, events, monitor, frame };
+  return { command, commands, manager, journal, opening, context, state, effects, events, monitor, frame, readStatus };
 }
 
 test('HTTP and legacy WS cannot create collection state from remembered, registered, opening or failed ports', async t => {
@@ -188,4 +191,28 @@ test('five seconds without a valid frame automatically finishes and never automa
 test('omitting trusted connection state fails closed even when the caller claims a COM path', () => {
   const service = createRuntimeControlService({ getRuntime: () => ({ com: 'COM_CLAIMED' }), setRuntime: () => assert.fail('must not mutate') });
   assert.throws(() => service.updateCollectionControl({ flag: true, connected: true }), { code: 'COLLECTION_DEVICE_NOT_CONNECTED' });
+});
+
+test('production status exposes per-connection data evidence without treating raw input or another port as ready', async t => {
+  const f = await fixture(t), sit = await f.opening(); sit.ready(); await f.manager.waitForOpen('sit');
+  const id = f.manager.getStatus('sit').connectionId;
+  sit.emit('data', Buffer.from([1, 2, 3]));
+  assert.equal(f.manager.getStatus('sit').health, 'ok');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.readStatus().serialDataStatus)), [{ role: 'sit', path: 'COM_FIXTURE_sit',
+    connectionId: id, isOpen: true, ready: false, lastFrameAgeMs: null, detectionSupported: true }]);
+  f.frame();
+  assert.equal(f.readStatus().serialDataStatus[0].ready, true, 'a canonical all-zero frame is valid');
+  const back = await f.opening('back'); back.ready(); await f.manager.waitForOpen('back');
+  assert.equal(f.readStatus().serialDataStatus.find(item => item.role === 'back').ready, false);
+  f.context.playback = true;
+  assert.equal(f.readStatus().serialDataStatus[0].ready, false);
+  f.context.playback = false; f.frame();
+  await f.manager.close('sit');
+  assert.equal(f.readStatus().serialDataStatus[0].isOpen, false);
+  assert.equal(f.readStatus().serialDataStatus[0].ready, false);
+  const reopened = await f.opening(); reopened.ready(); await f.manager.waitForOpen('sit');
+  assert.notEqual(f.readStatus().serialDataStatus[0].connectionId, id);
+  assert.equal(f.readStatus().serialDataStatus[0].ready, false);
+  f.context.type = 'minzhen';
+  assert.equal(f.readStatus().serialDataStatus[0].detectionSupported, false);
 });

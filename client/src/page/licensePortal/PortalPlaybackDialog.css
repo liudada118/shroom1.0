@@ -81,5 +81,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .portal-playback-content button { transition: none; }
-  .portal-playback-dialog-root .ant-modal { animation: none; transition: none; }
+  /* 保留结束事件，rc-motion 才能卸载回放弹窗和遮罩。 */
+  .portal-playback-dialog-root .ant-modal { animation-duration: .001s; transition-duration: .001s; }
 }

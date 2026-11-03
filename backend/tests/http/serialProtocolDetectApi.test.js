@@ -6,9 +6,18 @@ const { HTTP_ROUTES } = require('@shroom/backend/contract/sdkApiContract.js');
 
 async function main() {
   const calls = [];
+  let collectionPhase = null;
+  let notifyWaiting;
+  let notifyCancelled;
+  const waiting = new Promise(resolve => { notifyWaiting = resolve; });
+  const cancelled = new Promise(resolve => { notifyCancelled = resolve; });
   const serialProtocolProbeService = {
     detect: async (input) => {
       calls.push(input);
+      if (input.path === 'COM-WAIT') {
+        notifyWaiting();
+        await new Promise(resolve => input.signal.addEventListener('abort', () => { notifyCancelled(); resolve(); }, { once: true }));
+      }
       if (input.path === 'COM-BUSY') {
         const error = new Error('serial port is busy: COM-BUSY');
         error.code = 'SERIAL_PORT_BUSY';
@@ -58,6 +67,7 @@ async function main() {
     pdfPath: os.tmpdir(),
     serialManager: { getStatus: () => [] },
     serialProtocolProbeService,
+    getCollectionStatus: () => ({ current: collectionPhase ? { phase: collectionPhase } : null }),
   });
 
   const server = http.createServer(httpApp);
@@ -75,7 +85,38 @@ async function main() {
     assert.strictEqual(body.data.status, 'matched');
     assert.strictEqual(body.data.match.id, 'standard-1024');
     assert.strictEqual(body.data.match.protocol.validation, null);
-    assert.deepStrictEqual(calls[0], { path: 'COM7', candidateIds: ['standard-1024'] });
+    assert.strictEqual(calls[0].path, 'COM7');
+    assert.deepStrictEqual(calls[0].candidateIds, ['standard-1024']);
+    assert.strictEqual(calls[0].signal.aborted, false);
+
+    const nativeResponse = await fetch(`${baseUrl}${HTTP_ROUTES.serialProtocolDetect}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'COM8', connection: { sensorType: 'fast256', role: 'sit', connectionId: 7 } }),
+    });
+    assert.strictEqual(nativeResponse.status, 200);
+    await nativeResponse.json();
+    assert.deepStrictEqual(calls[1].connection, { sensorType: 'fast256', role: 'sit', connectionId: 7 });
+
+    for (const phase of ['collecting', 'finalizing']) {
+      collectionPhase = phase;
+      const guarded = await fetch(`${baseUrl}${HTTP_ROUTES.serialProtocolDetect}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'COM-GUARD' }),
+      });
+      assert.strictEqual(guarded.status, 409);
+      assert.strictEqual((await guarded.json()).errorCode, 'COLLECTION_ACTIVE');
+    }
+    collectionPhase = null;
+    assert.strictEqual(calls.length, 2, 'collection guard must run before touching hardware');
+
+    const controller = new AbortController();
+    const pending = fetch(`${baseUrl}${HTTP_ROUTES.serialProtocolDetect}`, {
+      method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'COM-WAIT', connection: { sensorType: 'fast256', role: 'sit' } }),
+    });
+    await waiting;
+    controller.abort();
+    await assert.rejects(pending, error => error.name === 'AbortError');
+    await cancelled;
 
     const busyResponse = await fetch(`${baseUrl}${HTTP_ROUTES.serialProtocolDetect}`, {
       method: 'POST',

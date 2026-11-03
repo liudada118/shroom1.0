@@ -37,6 +37,7 @@ function createLegacySerialFrameRuntimeAccessors({
     newArr: runtimeStateAccessor('newArr'),
     port1: { get: () => getManagedSerialPort(serialRoles.SIT) },
     port2: { get: () => getManagedSerialPort(serialRoles.BACK) },
+    portHead: { get: () => getManagedSerialPort(serialRoles.HEAD) },
     saveTime: collectionStateAccessor('saveTime'),
   };
 }

@@ -4,7 +4,7 @@ import { commandFromLegacyFields } from '../../services/command/commandClient';
 export function capturePortalOperation(owner) {
   const scope = owner._portalScope;
   const system = owner.props.matrixName;
-  return () => !owner._portalUnmounted
+  return () => !owner._portalUnmounted && !owner._portalLeaving
     && owner._portalScope === scope
     && owner.props.matrixName === system;
 }

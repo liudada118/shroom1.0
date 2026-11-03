@@ -79,6 +79,7 @@ const SENSOR_DEFINITIONS = {
   footL: { matrix: MATRIX_16, channels: ['sit'], capabilities: DEFAULT_CAPABILITIES },
   footR: { matrix: MATRIX_16, channels: ['back'], capabilities: DEFAULT_CAPABILITIES },
   footVideo: { matrix: MATRIX_16, channels: ['sit', 'back'], baudRate: 921600, capabilities: [...DEFAULT_CAPABILITIES, SENSOR_CAPABILITIES.ZERO_FRAME] },
+  fast256: { matrix: MATRIX_16, channels: ['sit'], baudRate: 921600, capabilities: DEFAULT_CAPABILITIES },
 
   [SMALL_BED_TYPE]: { matrix: MATRIX_32, channels: ['sit'], capabilities: [...DEFAULT_CAPABILITIES, SENSOR_CAPABILITIES.SMALL_BED_MATRIX] },
   [SMALL_BED_NO_ALG_TYPE]: { matrix: MATRIX_32, channels: ['sit'], capabilities: [...DEFAULT_CAPABILITIES, SENSOR_CAPABILITIES.SMALL_BED_MATRIX] },

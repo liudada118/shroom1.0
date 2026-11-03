@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { DISPLAY_CAPABILITIES, displaySupports, getDisplayDefinition, registerRuntimeDisplayDefinition } from './registry';
+import { getSensorFrameChannelValue, isSensorFrameForDisplay } from '../services/ws/sensorFrameDecoder';
+
+describe('16×16高速矩阵展示注册', () => {
+  it('提供Home接收256点压力帧所需的定义，并保留系统身份隔离', () => {
+    const definition = getDisplayDefinition('fast256');
+    expect(definition).not.toBeNull();
+    expect(definition.matrix).toEqual({ width: 16, height: 16, total: 256 });
+    expect(definition.channels).toEqual(['sit']);
+    expect(definition.defaultMode).toBe('normal');
+    expect(displaySupports('fast256', DISPLAY_CAPABILITIES.REALTIME)).toBe(true);
+    const values = Array.from({ length: 256 }, (_, index) => index);
+    const frame = { type: 'sensor.frame', schemaVersion: 1, displaySystemId: 'fast256',
+      sensorType: 'fast256', sensorId: 'sit', channelId: 'fast256:sit', outputChannel: 'sit',
+      payload: { value: values, stages: { mapped: [] }, matrix: { rows: 16, cols: 16, total: 256 } } };
+    expect(isSensorFrameForDisplay(frame, [definition.type])).toBe(true);
+    expect(getSensorFrameChannelValue(frame, 'sit')).toEqual(values);
+    expect(isSensorFrameForDisplay({ ...frame, displaySystemId: 'hand0205', channelId: 'hand0205:sit' }, [definition.type])).toBe(false);
+  });
+});
 
 describe('人体串口展示注册', () => {
   it.each(['humanBody', 'humanBodyOptimized', 'pressureVest'])('%s 的压力帧具有可接受的原生展示定义', (sensorType) => {

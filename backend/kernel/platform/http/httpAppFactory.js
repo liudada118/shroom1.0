@@ -163,6 +163,7 @@ function createHttpApp({
   getPort,
   getRealtimeChannels,
   getSerialStatus,
+  getSerialDefaults,
   getSitDb,
   getWsSubscriptionStatus,
   imgPath,
@@ -197,16 +198,53 @@ function createHttpApp({
   requireAccess = () => {},
   getLicenseAccess = () => null,
   getCollectionStatus = () => ({}),
+  getCurrentSensorType = () => null,
   getRuntimeVersions = () => ({}),
   // 展示系统目录变了要告诉正在跑的前端。Builder 在进程内保存时自己派发 DOM 事件，
   // 但 Agent / 脚本走的是这里的 HTTP 接口，前端毫无感知 —— 不广播的话新系统要重启软件才出现。
   publishDisplaySystemsUpdated = () => {},
 }) {
   const agentApps = agentAppService || createUnavailableAgentAppService();
+  /** 探测会临时打开硬件，只允许授权有效且没有采集或落库正在进行时执行。 */
+  function assertCanProbe() {
+    requireAccess('acquire');
+    if (['collecting', 'finalizing'].includes(getCollectionStatus()?.current?.phase)) {
+      throw Object.assign(new Error('请先停止采集，再识别设备。'), { code: 'COLLECTION_ACTIVE', httpStatus: 409 });
+    }
+  }
+  /** 原子核对本次默认连接后关闭无数据端口；已恢复数据或被替换的连接不得被探测打断。 */
+  async function prepareProbeConnection({ path, connection, signal }) {
+    assertCanProbe();
+    if (signal?.aborted) throw Object.assign(new Error('serial detection cancelled'), { code: 'SERIAL_CONNECT_CANCELLED', httpStatus: 409 });
+    const role = connection.role || 'sit';
+    const status = serialManager.getStatus(role);
+    const collection = getCollectionStatus();
+    const samePath = value => String(value || '').trim().toLowerCase() === String(path).trim().toLowerCase();
+    const evidence = collection?.serialDataStatus?.find(item => item.role === role && samePath(item.path)
+      && item.connectionId === connection.connectionId);
+    if (getCurrentSensorType() !== connection.sensorType || !status || !samePath(status.path)
+      || status.connectionId !== connection.connectionId || status.status !== 'open' || status.isOpen !== true) {
+      throw Object.assign(new Error('serial connection changed before detection'), { code: 'SERIAL_CONNECTION_CHANGED', httpStatus: 409 });
+    }
+    if (!evidence || evidence.isOpen !== true || evidence.detectionSupported !== true || typeof evidence.ready !== 'boolean') {
+      throw Object.assign(new Error('serial data status is unavailable'), { code: 'SERIAL_STATUS_UNAVAILABLE', httpStatus: 503 });
+    }
+    if (evidence.ready) return { status: 'reading', path, connectionId: status.connectionId };
+    // ⚠️ 检查到 stop 之间不能 await；否则迟到的帧、采集开始或新连接可能被误关闭。
+    const closed = await serialManager.close(role, 'default connection has no valid data');
+    if (closed?.ok !== true) throw closed?.error || Object.assign(new Error('serial close failed'), { code: 'SERIAL_CLOSE_FAILED', httpStatus: 409 });
+    assertCanProbe();
+    if (getCurrentSensorType() !== connection.sensorType || serialManager.getStatus(role)?.connectionId !== connection.connectionId) {
+      throw Object.assign(new Error('serial connection changed during close'), { code: 'SERIAL_CONNECTION_CHANGED', httpStatus: 409 });
+    }
+    return null;
+  }
   const protocolProbeService = serialProtocolProbeService || createSerialProtocolProbeService({
     serialManager,
     serialProtocolDirectories,
     logger,
+    assertCanProbe,
+    prepareConnection: prepareProbeConnection,
   });
   const httpApp = express();
   httpApp.use(cors());
@@ -607,11 +645,13 @@ function createHttpApp({
     controlCommandService,
     getPort,
     getRealtimeChannels,
+    getSerialDefaults,
     listPorts,
     logger,
     serialManager,
     serialProtocolDirectories,
     serialProtocolProbeService: protocolProbeService,
+    assertCanProbe,
   });
 
   registerReportRoutes(httpApp, {

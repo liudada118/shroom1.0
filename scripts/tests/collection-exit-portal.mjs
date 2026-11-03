@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -25,6 +25,8 @@ const server = await createServer({ root: fileURLToPath(new URL('../../client/',
 
 let browser, page, current = null, recent = null, revision = 0, failNextStop = false;
 let serialConnected = false, sourceReady = false, failNextStart = false;
+let playing = false, failNextPlaybackStop = false, holdNextPlaybackStop = false, pendingPlaybackStop;
+let holdNextHistoryLoad = false, pendingHistoryLoad;
 const sockets = new Set(), commands = [], errors = [];
 const system = 'smallBedNoAlg';
 const license = { date: Date.now() + 30 * 86400000, nowDate: Date.now(), selectFlag: 'all', valid: true };
@@ -71,6 +73,38 @@ async function readElapsed() {
   });
 }
 
+/** 等待夹具收到真实页面请求，超时保留命令序列供诊断。 */
+async function waitUntil(predicate, description) {
+  const deadline = Date.now() + 10000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`${description}: ${JSON.stringify(commands)}`);
+    await page.waitForTimeout(25);
+  }
+}
+
+/** 从真实回放弹窗选取记录；历史列表由隔离宿主广播。 */
+async function selectPlayback() {
+  publish({ timeArr: [{ date: recordId, info: recordId, name: recordId }] });
+  await page.locator('.portal-session-bar').getByRole('button', { name: '回放', exact: true }).click();
+  await page.getByRole('dialog').getByRole('radio').check();
+  await page.getByRole('dialog').getByRole('button', { name: '载入回放', exact: true }).click();
+}
+
+/** 从系统列表重进，确认用户可见模式与播放器都回到实时初态。 */
+async function reenterRealtime() {
+  await page.getByRole('button', { name: '进入该系统', exact: true }).click();
+  await page.locator('.portal-runtime-monitor[data-handoff="complete"]').waitFor();
+  assert.equal(await page.locator('.portal-session-bar').getByRole('button', { name: '实时', exact: true }).getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('.portal-session-bar').getByRole('button', { name: '回放', exact: true }).getAttribute('aria-pressed'), 'false');
+  assert.equal(await page.locator('.progressContent').isVisible(), false, '重进实时页不能保留播放进度条');
+}
+
+/** 返回正式命令的成功 ACK，仅模拟控制面，不冒充后端协议测试。 */
+function acknowledge(route) {
+  return route.fulfill({ headers: { 'Access-Control-Allow-Origin': '*' },
+    json: { code: 0, data: { ok: true, data: { results: [] } } } });
+}
+
 try {
   await server.listen();
   browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -91,6 +125,11 @@ try {
     if (path === '/api/serial/status') return route.fulfill({ headers, json: { serial: [serialStatus()] } });
     if (path === '/api/display-systems') return route.fulfill({ headers, json: { displaySystems: { runtimeDefinitions: [] } } });
     if (path === '/api/algorithm-market') return route.fulfill({ headers, json: { packages: [], instances: [] } });
+    if (path === '/api/serial/protocol-detect') return route.fulfill({ headers, json: { code: 0, data: {
+      status: 'matched', compatible: true, defaultBaudRate: 1000000,
+      match: { id: 'standard-1024', protocol: { baudRate: 1000000 } },
+      diagnostics: { attemptedBaudRates: [1000000] },
+    } } });
     if (path !== '/api/commands') return route.fulfill({ headers, json: {} });
     const command = route.request().postDataJSON(); commands.push(command);
     if (command.type === 'serial.open') {
@@ -100,6 +139,21 @@ try {
     }
     if (command.type === 'sensor.switch' && current) return route.fulfill({ status: 409, headers,
       json: { code: 409, message: '请先停止采集，再切换系统。' } });
+    if (command.type === 'sensor.switch') playing = false;
+    if (command.type === 'history.load') {
+      if (holdNextHistoryLoad) { holdNextHistoryLoad = false; pendingHistoryLoad = route; return; }
+      publish({ length: 9, historyTimeArr: Array.from({ length: 10 }, (_, index) => Number(recordId) + index * 100) });
+    }
+    if (command.type === 'playback.control') {
+      if (command.payload.play === false && command.payload.history === false) {
+        if (failNextPlaybackStop) {
+          failNextPlaybackStop = false;
+          return route.fulfill({ status: 503, headers, json: { code: 503, message: '测试回放停止失败，请重试' } });
+        }
+        if (holdNextPlaybackStop) { holdNextPlaybackStop = false; pendingPlaybackStop = route; return; }
+      }
+      if (command.payload.play != null) playing = command.payload.play;
+    }
     if (command.type === 'collection.control') {
       if (command.payload.active) {
         if (failNextStart) {
@@ -233,10 +287,56 @@ try {
     && request.method() === 'POST' && request.postDataJSON()?.type === 'history.load');
   await playbackDialog.getByRole('button', { name: '载入回放', exact: true }).click();
   assert.equal((await loadRequest).postDataJSON().payload.date, recordId, '日期标签格式化后回放仍发送原始记录ID');
+  await waitUntil(() => playing, '载入记录必须明确发出播放命令');
+  await playbackDialog.waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('.portal-session-bar').getByRole('button', { name: '回放', exact: true }).getAttribute('aria-pressed'), 'true');
+  holdNextPlaybackStop = true;
+  await page.getByRole('button', { name: '← 返回系统列表', exact: true }).click();
+  await waitUntil(() => pendingPlaybackStop, '返回按钮必须停止回放并等待 ACK');
+  assert.equal(await page.locator('.portal-runtime-monitor').count(), 1, '停止回放尚未确认时不可先离开页面');
+  playing = false;
+  await acknowledge(pendingPlaybackStop); pendingPlaybackStop = null;
+  await page.locator('.portal-runtime-monitor').waitFor({ state: 'detached' });
+  await reenterRealtime();
+  await page.screenshot({ path: join(artifacts, 'playback-return-realtime.png') });
+
+  await selectPlayback();
+  await waitUntil(() => playing, '第二次显式载入仍可播放');
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await page.locator('.playContent img:visible').click();
+  await waitUntil(() => !playing, '播放器暂停应停止后台播放');
+  failNextPlaybackStop = true;
+  await page.getByRole('button', { name: '退出监测返回系统列表', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: '测试回放停止失败' }).waitFor();
+  assert.equal(await page.locator('#portal-monitor-content').evaluate(element => element.inert), false, '退出失败应恢复页面交互');
+  assert.equal(await page.locator('.portal-session-bar').getByRole('button', { name: '回放', exact: true }).getAttribute('aria-pressed'), 'true');
+  await page.getByRole('button', { name: '退出监测返回系统列表', exact: true }).click();
+  await page.locator('.portal-runtime-monitor').waitFor({ state: 'detached' });
+  await reenterRealtime();
+
+  holdNextHistoryLoad = true;
+  await selectPlayback();
+  await waitUntil(() => pendingHistoryLoad, '应停在历史载入 ACK 前');
+  const lateStartIndex = commands.length;
+  // 弹窗遮罩下无法鼠标点导航；派发真实按钮事件验证已发请求与退出竞争，不直接修改React状态。
+  await page.getByRole('button', { name: '← 返回系统列表', exact: true }).evaluate(button => button.click());
+  await page.locator('.portal-runtime-monitor').waitFor({ state: 'detached' });
+  await acknowledge(pendingHistoryLoad); pendingHistoryLoad = null;
+  await page.waitForTimeout(250);
+  assert.equal(commands.slice(lateStartIndex).some(command => command.type === 'playback.control' && command.payload.play === true), false,
+    '退出后的迟到载入 ACK 不能重新启动回放');
+  await reenterRealtime();
   assert.deepEqual(errors, []);
+  const report = { artifacts, commands: commands.map(command => ({ type: command.type, payload: command.payload })), stoppedAt,
+    receipts: ['stale-hidden', 'finalizing-retained', 'dismiss-remount', 'saved-auto-hide', 'partial-retained', 'dismiss-reload'],
+    playbackExit: ['playing-back-waits-ack', 'same-system-reenter-realtime', 'paused-close-failure-retry', 'late-load-no-restart'], recordId, recordLabel };
+  await writeFile(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
   console.log('COLLECTION_EXIT_PORTAL_PASS', JSON.stringify({ artifacts, commands: commands.map(command => command.type), stoppedAt,
-    receipts: ['stale-hidden', 'finalizing-retained', 'dismiss-remount', 'saved-auto-hide', 'partial-retained', 'dismiss-reload'], recordId, recordLabel }));
+    receipts: report.receipts, playbackExit: report.playbackExit, recordId, recordLabel }));
 } catch (error) {
   await page?.screenshot({ path: join(artifacts, 'failure.png') }).catch(() => {});
+  await writeFile(join(artifacts, 'failure.json'), JSON.stringify({ error: error.message, errors,
+    commands: commands.map(command => ({ type: command.type, payload: command.payload })), playing,
+    pendingHistoryLoad: Boolean(pendingHistoryLoad), pendingPlaybackStop: Boolean(pendingPlaybackStop) }, null, 2));
   console.error('COLLECTION_EXIT_PORTAL_FAILED', JSON.stringify({ artifacts, errors })); throw error;
 } finally { await browser?.close(); await server.close(); }

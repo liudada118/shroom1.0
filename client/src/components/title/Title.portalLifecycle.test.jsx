@@ -103,6 +103,71 @@ describe('Title 门户操作生命周期', () => {
     expect(title.props.onPortalPlaybackStarted).not.toHaveBeenCalled();
   });
 
+  it.each(['pause', 'load'])('返回系统列表期间 %s 的迟到 ACK 不能载入或重启回放，退出失败仍可重新操作', async (stage) => {
+    const title = createTitle({ portalPlaybackOpen: true });
+    const response = deferred();
+    if (stage === 'pause') commandClient.execute.mockReturnValueOnce(response.promise);
+    else commandClient.executeEnvelope.mockReturnValueOnce(response.promise);
+    const pending = title.loadPortalPlayback('record-a');
+    if (stage === 'load') await vi.waitFor(() => expect(commandClient.executeEnvelope).toHaveBeenCalledOnce());
+    title.beginPortalExit();
+    expect(title.state).toMatchObject({ portalBusy: false, portalPlaybackOpen: false });
+    await title.loadPortalPlayback('record-b');
+    await title.changePortalMode('playback');
+    title.cancelPortalExit();
+    response.resolve({ ok: true });
+    await pending;
+    expect(commandClient.execute).toHaveBeenCalledTimes(1);
+    expect(commandClient.executeEnvelope).toHaveBeenCalledTimes(stage === 'load' ? 1 : 0);
+    expect(title.props.changeStateData).not.toHaveBeenCalled();
+    expect(title.props.onPortalPlaybackStarted).not.toHaveBeenCalled();
+    await title.loadPortalPlayback('record-b');
+    expect(title.props.onPortalPlaybackStarted).toHaveBeenCalledOnce();
+  });
+
+  it('采集启动 ACK 待定时退出失败，旧启动不更新界面，再次采集不会被遗留启动锁挡住', async () => {
+    const title = createTitle();
+    title.props.history = 'now'; title.props.colFlag = true;
+    title.props.setColValueFlag = vi.fn();
+    vi.spyOn(title, 'requireCollectionDevice').mockReturnValue(true);
+    const response = deferred();
+    commandClient.executeEnvelope.mockReturnValueOnce(response.promise);
+    const pending = title.startCollectionWithOptions();
+    expect(title.state.collectionStarting).toBe(true);
+    title.beginPortalExit(); title.cancelPortalExit();
+    response.resolve({ ok: true }); await pending;
+    expect(title.props.setColValueFlag).not.toHaveBeenCalled();
+    expect(title.state.collectionStarting).toBe(false);
+    expect(title._collectionStarting).toBeNull();
+    title.openCollectionModal();
+    expect(title.state.collectionModalOpen).toBe(true);
+  });
+
+  it('导出路径验证待定时退出失败，旧请求失效且再次导出不会卡在启动锁', async () => {
+    const title = createTitle({ dataTime: 'record-a', csvDownloadFormat: 'csv', csvDownloadPath: 'C:/fixture-output' });
+    title.props.wsSendObj = vi.fn();
+    const response = deferred();
+    window.electronAPI = { invoke: vi.fn().mockReturnValueOnce(response.promise).mockResolvedValue({ success: true }) };
+    const pending = title.startCsvDownload();
+    expect(title._csvStarting).toBe(true);
+    title.beginPortalExit(); title.cancelPortalExit();
+    response.resolve({ success: true }); await pending;
+    expect(title.props.wsSendObj).not.toHaveBeenCalled();
+    expect(title._csvStarting).toBe(false);
+    await title.startCsvDownload();
+    expect(title.props.wsSendObj).toHaveBeenCalledWith(expect.objectContaining({ download: 'record-a' }));
+  });
+
+  it('只允许回放的许可重进后可打开回放，模式命令同时携带暂停而不申请实时权限', async () => {
+    const title = createTitle();
+    title.props = { ...title.props, history: 'now', colFlag: true, data: { current: null },
+      licenseAccess: { schemaVersion: 1, state: 'expired', canAcquire: false, canReadHistory: true, canStop: true } };
+    await title.changePortalMode('playback');
+    expect(commandClient.execute).toHaveBeenCalledWith('history.mode', { local: true, history: false, play: false });
+    expect(title.props.changeStateData).toHaveBeenCalledWith(expect.objectContaining({ history: 'playback', local: true }));
+    expect(title.state.portalBusy).toBe(false);
+  });
+
   it.each(['scope', 'unmount'])('删除等待暂停 ACK 期间 %s 失效，不能继续发删除命令', async (reason) => {
     const title = createTitle({ dataTime: 'record-a' });
     const pause = deferred();

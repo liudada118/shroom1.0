@@ -74,7 +74,10 @@ function normalizeDynamicSerialCommand(message) {
       });
     }
     return {
-      command: { channelPorts: { [role]: envelope.payload.path } },
+      command: {
+        channelPorts: { [role]: envelope.payload.path },
+        ...(envelope.payload.baudRate != null ? { baudRate: envelope.payload.baudRate } : {}),
+      },
       envelope,
       legacy: false,
     };

@@ -208,4 +208,96 @@ context.nowDate = context.endDate;
 runtime.handleSitSerialFrame(Buffer.from([3]));
 assert.strictEqual(resetEvents.length, resetCount);
 
+/** 生成可独立检查两半内容的旧分包，尾包IMU用零值避免干扰压力期望。 */
+function makeSegment(length, order, type, value, withImu = false) {
+  const segment = Buffer.alloc(length, value);
+  segment[0] = order;
+  segment[1] = type;
+  if (withImu) segment.fill(0, length - 16);
+  return segment;
+}
+
+/** 只替换设备与发布边界，仍由生产legacy运行时与分包处理器拼帧。 */
+function createSegmentFixture() {
+  const events = [];
+  const segmentContext = { ...context, file: 'fast256', nowDate: 0, endDate: 1,
+    port1: { isOpen: true }, port2: { isOpen: true }, portHead: { isOpen: true },
+    colOrSendData: (json) => { const frame = JSON.parse(json); events.push(frame); return { frame }; },
+    colOrSendData1: (json) => { const frame = JSON.parse(json); events.push(frame); return { frame }; },
+    colOrSendData2: (json) => { const frame = JSON.parse(json); events.push(frame); return { frame }; },
+  };
+  return { events, context: segmentContext, runtime: createLegacySerialFrameRuntime(segmentContext) };
+}
+
+for (const [channel, method, portKey, firstLength, secondLength, withImu] of [
+  ['sit', 'handleSitSerialFrame', 'port1', 130, 146, true],
+  ['sit', 'handleSitSerialFrame', 'port1', 142, 158, true],
+  ['back', 'handleBackSerialFrame', 'port2', 130, 146, true],
+  ['back', 'handleBackSerialFrame', 'port2', 130, 130, false],
+  ['head', 'handleHeadSerialFrame', 'portHead', 130, 146, true],
+  ['head', 'handleHeadSerialFrame', 'portHead', 130, 130, false],
+]) {
+  const fixture = createSegmentFixture();
+  const send = fixture.runtime[method];
+  const first = makeSegment(firstLength, 1, 1, 31);
+  const second = makeSegment(secondLength, 2, 1, 47, withImu);
+  const expected = [...new Array(firstLength - 2).fill(31), ...new Array(firstLength - 2).fill(47)];
+  send(second);
+  assert.strictEqual(fixture.events.length, 0, `${channel}: orphan tail must not publish a partial matrix`);
+  send(first);
+  send(second);
+  assert.deepStrictEqual(fixture.events.at(-1)[`${channel}Data`], expected);
+  send(second);
+  assert.strictEqual(fixture.events.length, 1, `${channel}: a completed first packet is consumed only once`);
+
+  send(first);
+  fixture.context[portKey] = { isOpen: true };
+  send(second);
+  assert.strictEqual(fixture.events.length, 1, `${channel}: a new physical port cannot reuse the old first packet`);
+  send(first);
+  send(second);
+  assert.strictEqual(fixture.events.length, 2, `${channel}: a complete pair on the new connection still renders`);
+
+  send(first);
+  fixture.context.file = 'other-system';
+  send(second);
+  assert.strictEqual(fixture.events.length, 2, `${channel}: changing systems invalidates the pending first packet`);
+  send(first);
+  send(makeSegment(secondLength, 2, 2, 59, withImu));
+  assert.strictEqual(fixture.events.length, 2, `${channel}: a different packet type cannot consume this first packet`);
+  send(second);
+  assert.strictEqual(fixture.events.length, 3, `${channel}: interleaved other-side traffic preserves a matching first packet`);
+}
+
+const incompatibleLength = createSegmentFixture();
+incompatibleLength.runtime.handleSitSerialFrame(makeSegment(142, 1, 1, 11));
+incompatibleLength.runtime.handleSitSerialFrame(makeSegment(146, 2, 1, 12, true));
+incompatibleLength.runtime.handleSitSerialFrame(makeSegment(158, 2, 1, 13, true));
+assert.strictEqual(incompatibleLength.events.length, 0, '130/146 and 142/158 variants must not splice into each other');
+
+const isolatedChannels = createSegmentFixture();
+isolatedChannels.runtime.handleSitSerialFrame(makeSegment(130, 1, 1, 21));
+isolatedChannels.runtime.handleBackSerialFrame(makeSegment(146, 2, 1, 22, true));
+isolatedChannels.runtime.handleHeadSerialFrame(makeSegment(146, 2, 1, 23, true));
+assert.strictEqual(isolatedChannels.events.length, 0, 'a first packet belongs only to its source channel');
+isolatedChannels.runtime.handleSitSerialFrame(makeSegment(146, 2, 1, 24, true));
+assert.strictEqual(isolatedChannels.events.length, 1, 'other channel traffic must not consume the source channel first packet');
+
+for (const method of ['handleSitSerialFrame', 'handleBackSerialFrame']) {
+  const interleaved = createSegmentFixture();
+  const delegated = [];
+  interleaved.context.handleHandGloveDoublePacket = (buffer) => {
+    delegated.push([buffer.length, buffer[1]]);
+    return true;
+  };
+  const send = interleaved.runtime[method];
+  send(makeSegment(130, 1, 1, 31));
+  send(makeSegment(130, 1, 2, 41));
+  send(makeSegment(146, 2, 1, 51, true));
+  send(makeSegment(146, 2, 2, 61, true));
+  send(makeSegment(146, 2, 1, 71, true));
+  assert.deepStrictEqual(delegated, [[130, 1], [130, 2], [146, 1], [146, 2]],
+    `${method}: dual-hand parser must receive both complete pairs when hand sides interleave on one COM`);
+}
+
 console.log('legacySerialFrameRuntimeState.test.js passed');

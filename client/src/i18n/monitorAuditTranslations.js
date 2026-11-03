@@ -1,6 +1,161 @@
 // Static interface copy only; system IDs, saved labels and sensor data stay unchanged.
 export default {
   "monitorUi": {
+    "serialBaudRate": {
+      "zh": "波特率",
+      "en": "Baud rate",
+      "ja": "ボーレート"
+    },
+    "serialBaudDefault": {
+      "zh": "系统默认",
+      "en": "System default",
+      "ja": "システム既定値"
+    },
+    "serialBaudNextConnection": {
+      "zh": "修改后在下次连接串口时生效",
+      "en": "Changes apply the next time you connect the port",
+      "ja": "変更は次のシリアル接続時に適用されます"
+    },
+    "serialBaudInvalid": {
+      "zh": "不支持该波特率，请使用 921600、1000000、1500000、3000000、6000000 或当前系统默认值。",
+      "en": "Use 921600, 1000000, 1500000, 3000000, 6000000, or this system’s default baud rate.",
+      "ja": "921600、1000000、1500000、3000000、6000000、または現在のシステムの既定値を使用してください。"
+    },
+    "serialDetectionReading": {
+      "zh": "串口已连接，正在等待有效数据…",
+      "en": "Port connected. Waiting for valid data…",
+      "ja": "ポートに接続しました。有効なデータを待っています…"
+    },
+    "serialDetectionFallback": {
+      "zh": "默认连接未收到有效数据，正在识别波特率和协议…",
+      "en": "No valid data with the default connection. Identifying baud rate and protocol…",
+      "ja": "既定の接続で有効なデータを受信できません。ボーレートとプロトコルを識別中…"
+    },
+    "serialDetectionNoDataAfterConnect": {
+      "zh": "已按识别结果连接，但尚未收到有效数据。请检查设备是否持续发送数据。",
+      "en": "Connected using the detected settings, but no valid data has arrived. Check that the device is sending data.",
+      "ja": "識別結果で接続しましたが、有効なデータを受信できません。デバイスの送信状態を確認してください。"
+    },
+    "playbackExitTimeout": {
+      "zh": "暂停回放未确认，请稍后重试退出。",
+      "en": "Playback pause was not confirmed. Please try exiting again.",
+      "ja": "再生の一時停止を確認できませんでした。もう一度終了をお試しください。"
+    },
+    "serialDetecting": {
+      "zh": "正在识别波特率和协议…",
+      "en": "Identifying baud rate and protocol…",
+      "ja": "ボーレートとプロトコルを識別中…"
+    },
+    "serialDetectionWaiting": {
+      "zh": "识别完成，请查看连接结果。",
+      "en": "Identification complete. Review the result.",
+      "ja": "識別が完了しました。結果を確認してください。"
+    },
+    "serialDetectionCollecting": {
+      "zh": "请先停止采集并等待保存完成，再识别设备。",
+      "en": "Stop recording and wait for saving to finish before identifying a device.",
+      "ja": "記録を停止し、保存が完了してからデバイスを識別してください。"
+    },
+    "serialDetectedConnecting": {
+      "zh": "已识别波特率 {{baudRate}}，正在连接。",
+      "en": "Detected {{baudRate}} baud. Connecting.",
+      "ja": "ボーレート {{baudRate}} を識別しました。接続中です。"
+    },
+    "serialDetectionResult": {
+      "zh": "设备识别结果",
+      "en": "Device identification result",
+      "ja": "デバイスの識別結果"
+    },
+    "serialDetectionDifferent": {
+      "zh": "已识别到兼容协议，实际波特率与本系统默认值不同。请确认后使用识别结果连接。",
+      "en": "A compatible protocol was detected at a different baud rate from this system’s default. Confirm to connect using the detected result.",
+      "ja": "互換プロトコルを検出しましたが、ボーレートがこのシステムの既定値と異なります。識別結果を確認して接続してください。"
+    },
+    "serialDetectionAmbiguous": {
+      "zh": "检测到的数据符合多个协议，暂未连接。请核对传感器型号和所属系统后重新选择串口识别。",
+      "en": "The data matches multiple protocols. No connection was made. Check the sensor model and system, then select the port again to identify it.",
+      "ja": "データが複数のプロトコルに一致するため接続していません。センサーの型番とシステムを確認し、ポートを選び直して識別してください。"
+    },
+    "serialDetectionIncompatible": {
+      "zh": "已识别到设备协议，但与当前系统不兼容，暂未连接。请进入对应系统后连接。",
+      "en": "The detected device protocol is incompatible with this system. No connection was made. Open the matching system to connect.",
+      "ja": "識別したプロトコルは現在のシステムに対応していないため接続していません。対応するシステムで接続してください。"
+    },
+    "serialDetectionUnknown": {
+      "zh": "暂未识别到有效协议，未建立采集连接。请检查供电、接线和设备是否持续发送数据，再重新选择串口识别。",
+      "en": "No valid protocol was identified, so no recording connection was made. Check power, wiring and whether the device is sending data, then select the port again.",
+      "ja": "有効なプロトコルを識別できず、記録用の接続は確立していません。電源、配線、データ送信を確認し、ポートを選び直してください。"
+    },
+    "serialDetectionUseResult": {
+      "zh": "使用识别结果连接",
+      "en": "Connect using this result",
+      "ja": "識別結果で接続"
+    },
+    "serialDetectionPort": {
+      "zh": "串口",
+      "en": "Serial port",
+      "ja": "シリアルポート"
+    },
+    "serialDetectionBaud": {
+      "zh": "识别波特率",
+      "en": "Detected baud rate",
+      "ja": "識別したボーレート"
+    },
+    "serialDetectionProtocol": {
+      "zh": "识别协议",
+      "en": "Detected protocol",
+      "ja": "識別したプロトコル"
+    },
+    "serialDetectionAttempted": {
+      "zh": "已检测波特率",
+      "en": "Baud rates checked",
+      "ja": "確認したボーレート"
+    },
+    "serialDetectionRates": {
+      "zh": "默认连接，无数据时识别 · {{rates}}",
+      "en": "Connect with defaults; identify if no data · {{rates}}",
+      "ja": "既定値で接続し、データがない場合に識別 · {{rates}}"
+    },
+    "serialDetectionUnsupported": {
+      "zh": "此系统使用预设连接参数，暂不支持自动识别。",
+      "en": "This system uses preset connection parameters; automatic identification is not supported yet.",
+      "ja": "このシステムは既定の接続設定を使用し、自動識別にはまだ対応していません。"
+    },
+    "serialProtocol_matrix-256": {
+      "zh": "256 点单帧矩阵（16×16）",
+      "en": "256-point matrix (16×16)",
+      "ja": "256 点マトリックス（16×16）"
+    },
+    "serialProtocol_standard-1024": {
+      "zh": "标准 1024 点压力帧（32×32）",
+      "en": "Standard 1024-point pressure frame (32×32)",
+      "ja": "標準 1024 点圧力フレーム（32×32）"
+    },
+    "serialProtocol_small-bed-12b": {
+      "zh": "小床 12B（1024×16 位）",
+      "en": "Small bed 12B (1024×16-bit)",
+      "ja": "小型ベッド 12B（1024×16 ビット）"
+    },
+    "serialProtocol_bed-4096": {
+      "zh": "4096 点压力帧（64×64）",
+      "en": "4096-point pressure frame (64×64)",
+      "ja": "4096 点圧力フレーム（64×64）"
+    },
+    "serialProtocol_low-density-72": {
+      "zh": "低密度 72 点",
+      "en": "Low-density 72-point",
+      "ja": "低密度 72 点"
+    },
+    "serialProtocol_low-density-144": {
+      "zh": "低密度 144 点",
+      "en": "Low-density 144-point",
+      "ja": "低密度 144 点"
+    },
+    "serialProtocol_glove-segmented": {
+      "zh": "手套分包协议（130+146）",
+      "en": "Segmented glove protocol (130+146)",
+      "ja": "分割グローブプロトコル（130+146）"
+    },
     "colorSliderMax": {
       "zh": "颜色调节上限",
       "en": "Color slider maximum",

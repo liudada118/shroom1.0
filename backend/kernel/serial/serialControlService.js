@@ -188,6 +188,10 @@ function registerSerialControlHandlers(router, deps) {
         db: dbObj.db,
         db1: dbObj.db1,
         db2: dbObj.db2,
+        // ⚠️ 同系统重进也要清回放模式，否则新页面的实时采集仍会被旧历史状态拦住。
+        localFlag: false,
+        history: false,
+        playFlag: false,
         nowIndex: 0,
         localData: [],
         localDataBack: [],
@@ -223,13 +227,18 @@ function registerSerialControlHandlers(router, deps) {
       message.sensorClose === true
     ),
     handle: (message, context = {}) => {
-      if (message.sitPort != null || message.headPort != null || message.sensorPort != null || message.backPort != null || message.channelPorts != null) requireAuthorizedRuntime();
+      const opening = message.sitPort != null || message.headPort != null || message.sensorPort != null || message.backPort != null || message.channelPorts != null;
+      if (opening) {
+        requireAuthorizedRuntime();
+        deps.requireSerialConfigurationIdle?.();
+      }
+      const options = message.baudRate != null ? { baudRate: message.baudRate } : {};
       deps.resetHandPacketRuntime?.();
       // manifest 多传感器系统用 channelPorts 这一个字段承载任意数量的通道，
       // 而不是给每个新传感器再加一对 xxxPort / xxxClose 命令字段。
       if (message.channelPorts && typeof message.channelPorts === 'object') {
         if (typeof openManifestSerialPorts === 'function') {
-          openManifestSerialPorts(message.channelPorts, context.scope || 'main');
+          openManifestSerialPorts(message.channelPorts, context.scope || 'main', options);
           Object.keys(message.channelPorts).forEach((role) => trackOpen(role, context));
         } else {
           Object.entries(message.channelPorts).forEach(([serialRole, portPath]) => {
@@ -238,6 +247,7 @@ function registerSerialControlHandlers(router, deps) {
               serialRole,
               portPath,
               `${context.scope || 'main'} ${serialRole}`,
+              options,
             );
             if (!opened) {
               const error = new Error(`serial role is not declared by current manifest: ${serialRole}`);
@@ -267,12 +277,12 @@ function registerSerialControlHandlers(router, deps) {
         }
       }
       if (message.sitPort != null) {
-        openSitSerialPort(message.sitPort, `${context.scope || 'main'} sitPort`);
+        openSitSerialPort(message.sitPort, `${context.scope || 'main'} sitPort`, options);
         setRuntime({ sitClose: false, com: message.sitPort });
         trackOpen(serialRoles.SIT, context);
       }
       if (message.headPort != null) {
-        openHeadSerialPort(message.headPort, `${context.scope || 'main'} headPort`);
+        openHeadSerialPort(message.headPort, `${context.scope || 'main'} headPort`, options);
         setRuntime({ headClose: false, comhead: message.headPort });
         trackOpen(serialRoles.HEAD, context);
       }
@@ -281,7 +291,7 @@ function registerSerialControlHandlers(router, deps) {
         trackOpen(serialRoles.SENSOR, context);
       }
       if (message.backPort != null) {
-        openBackSerialPort(message.backPort, `${context.scope || 'main'} backPort`);
+        openBackSerialPort(message.backPort, `${context.scope || 'main'} backPort`, options);
         setRuntime({ backClose: false, com1: message.backPort });
         trackOpen(serialRoles.BACK, context);
       }
@@ -352,6 +362,7 @@ function registerSerialControlHandlers(router, deps) {
     when: (message) => message.exchange != null,
     handle: () => {
       requireAuthorizedRuntime();
+      deps.requireSerialConfigurationIdle?.();
       const runtime = getRuntime();
       deps.resetHandPacketRuntime?.();
       const nextCom = runtime.com1;
@@ -398,7 +409,9 @@ function registerSerialControlHandlers(router, deps) {
     when: (message) => message.autoConnectHand0205Double === true,
     handle: (_message, context = {}) => {
       requireAuthorizedRuntime();
+      deps.requireSerialConfigurationIdle?.();
       const connecting = listPorts({ throwOnError: true }).then(async (ports) => {
+        deps.requireSerialConfigurationIdle?.();
         const serialport = getPort(ports);
         logSerialPortList('autoConnectHand0205Double', serialport);
         setRuntime({ serialport });

@@ -127,6 +127,8 @@ function buildZeroPlaybackFrame({
       ? new Array(256).fill(0)
       : new Array(1024).fill(0);
   }
+  // ⚠️ 16×16清屏保持256点，否则回放切换时空帧尺寸与实时帧不一致。
+  if (sensorType === 'fast256') return new Array(256).fill(0);
   // ⚠️ 64×64 清屏也必须是完整帧，短帧会让点图插值和平滑缓存出现 NaN，导致后续回放缺图。
   if (sensorType === 'bed4096' || sensorType === 'bed4096num') {
     return new Array(4096).fill(0);

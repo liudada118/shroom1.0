@@ -244,3 +244,26 @@ test('mutating a returned status or the source array cannot forge readiness or r
   assert.equal(f.monitor.status().ready, true, 'freshness stores only receive time, not a retained data reference');
   assert.deepEqual(Object.keys(f.monitor.status()).sort(), ['code', 'connected', 'lastFrameAgeMs', 'ready', 'systemId', 'timeoutMs']);
 });
+
+test('connection readiness belongs only to the requested physical role and generation', t => {
+  const f = fixture(t); f.state.connected = true; f.state.roles = ['sit', 'back'];
+  f.state.roleConnectionKeys = { sit: 'sit-1', back: 'back-1' };
+  f.frame();
+  assert.deepEqual(f.monitor.connectionStatus('sit', 'sit-1'), { ready: true, lastFrameAgeMs: 0 });
+  assert.deepEqual(f.monitor.connectionStatus('back', 'back-1'), { ready: false, lastFrameAgeMs: null });
+  assert.deepEqual(f.monitor.connectionStatus('sit', 'sit-0'), { ready: false, lastFrameAgeMs: null });
+  const count = f.statuses.length;
+  f.advance(10); f.monitor.connectionStatus('sit', 'sit-1');
+  assert.equal(f.statuses.length, count, 'polling does not publish frame-age updates');
+  f.state.roleConnectionKeys.sit = 'sit-2';
+  assert.deepEqual(f.monitor.connectionStatus('sit', 'sit-2'), { ready: false, lastFrameAgeMs: null });
+  assert.deepEqual(f.monitor.connectionStatus('sit', 'sit-1'), { ready: false, lastFrameAgeMs: null });
+  f.frame(); f.advance(5000);
+  assert.deepEqual(f.monitor.connectionStatus('sit', 'sit-2'), { ready: false, lastFrameAgeMs: 5000 });
+  f.frame(); f.state.playback = true;
+  assert.deepEqual(f.monitor.connectionStatus('sit', 'sit-2'), { ready: false, lastFrameAgeMs: null });
+  f.state.playback = false;
+  assert.equal(f.monitor.connectionStatus('sit', 'sit-2').ready, false);
+  f.frame(); f.monitor.dispose();
+  assert.deepEqual(f.monitor.connectionStatus('sit', 'sit-2'), { ready: false, lastFrameAgeMs: null });
+});

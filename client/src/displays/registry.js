@@ -110,6 +110,7 @@ export const DISPLAY_REGISTRY = {
   xiyueReal1: defineDisplay('xiyueReal1'),
   handBlue: defineDisplay('handBlue'),
   newHand: defineDisplay('newHand'),
+  fast256: defineDisplay('fast256', { matrix: MATRIX_16, defaultMode: 'normal' }),
   fast1024: defineDisplay('fast1024'),
   fast1024sit: defineDisplay('fast1024sit'),
   normalFast: defineDisplay('normalFast'),

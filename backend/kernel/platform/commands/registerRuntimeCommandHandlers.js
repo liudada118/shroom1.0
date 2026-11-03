@@ -11,6 +11,11 @@
  */
 const { createRuntimeControlService } = require('./runtimeControlService');
 
+/** 串口打开携带的波特率由该连接处理，不能顺带覆盖其它端口的默认值。 */
+function hasSerialOpen(message) {
+  return ['sitPort', 'backPort', 'headPort', 'sensorPort', 'channelPorts'].some((field) => message[field] != null);
+}
+
 /**
  * 把六个运行时控制 handler 注册到控制命令路由器。
  *
@@ -75,9 +80,9 @@ function registerRuntimeCommandHandlers(router, deps) {
   // 运行时参数：串口波特率和算法/平滑开关。
   router.register({
     name: 'runtime-options',
-    when: (message) => message.baudRate != null || message.gauss != null,
+    when: (message) => (message.baudRate != null && !hasSerialOpen(message)) || message.gauss != null,
     handle: (message) => {
-      runtimeControlService.updateRuntimeOptions(message);
+      runtimeControlService.updateRuntimeOptions(hasSerialOpen(message) ? { gauss: message.gauss } : message);
     },
   });
 

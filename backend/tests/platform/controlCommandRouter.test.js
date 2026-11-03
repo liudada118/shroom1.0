@@ -97,6 +97,12 @@ const dynamicOpenResult = protocolRouter.handle({
 });
 assert.strictEqual(dynamicOpenResult.handled, true);
 assert.deepStrictEqual(dynamicCommand, { channelPorts: { armLeft: 'COM11' } });
+protocolRouter.handle({
+  type: 'serial.open',
+  payload: { role: 'armLeft', path: 'COM11', baudRate: 6000000 },
+  requestId: 'req-router-dynamic-baud',
+});
+assert.deepStrictEqual(dynamicCommand, { channelPorts: { armLeft: 'COM11' }, baudRate: 6000000 });
 
 protocolRouter.handle({
   type: 'serial.close',

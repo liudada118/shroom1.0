@@ -80,6 +80,7 @@ const testFiles = [
   'backend/tests/serial/serialProtocolProbeService.test.js',
   'backend/tests/serial/serialPortOrchestrator.test.js',
   'backend/tests/application/serialControlService.test.js',
+  'backend/tests/application/runtimeCommandHandlers.test.js',
   'backend/tests/http/displaySystemsApi.test.js',
   'backend/tests/http/agentAppsApi.test.js',
   'backend/tests/http/serialProtocolsApi.test.js',

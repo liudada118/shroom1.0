@@ -12,12 +12,12 @@ const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
 const home = ast.program.body.find(node => node.type === 'ClassDeclaration' && node.id.name === 'Home');
 
 /** 运行真实Home采集方法，避免加载与秒表无关的全部模型与设备依赖。 */
-function createHome(finishCollectionBeforeExit = vi.fn().mockResolvedValue(null)) {
+function createHome(finishCollectionBeforeExit = vi.fn().mockResolvedValue(null), stopPlaybackBeforeExit = vi.fn().mockResolvedValue()) {
   const names = ['setColValueFlag', 'applyCollectionSummary', 'startCollectionTimer', 'stopCollectionTimer', 'preparePortalExit',
     'observeCollectionFrame', 'resetCollectionFrameReadiness', 'appendControlCollectionRow', 'applyCollectionSourceStatus'];
   const methods = home.body.body.filter(node => names.includes(node.key?.name)).map(node => source.slice(node.start, node.end));
   const instance = vm.runInNewContext(`new (class { ${methods.join('\n')} })()`, {
-    readCollectionSummary, finishCollectionBeforeExit, Date, setInterval, clearInterval, DOMException, Promise,
+    readCollectionSummary, finishCollectionBeforeExit, stopPlaybackBeforeExit, Date, setInterval, clearInterval, DOMException, Promise,
     getSensorFrameChannelValue, canUseLicenseCapability, message: { warning: vi.fn() }, collection: [],
     localStorage: { setItem: vi.fn() }, wsPointDataSit: [], wsPointDataBack: [],
   });
@@ -25,7 +25,8 @@ function createHome(finishCollectionBeforeExit = vi.fn().mockResolvedValue(null)
     wsConnected: true, local: false, collectionLocalFrameReady: false };
   instance.props = { t: key => key };
   instance.wsSendObj = vi.fn();
-  instance.title = { current: { changeNum: vi.fn() } };
+  instance.title = { current: { changeNum: vi.fn(), beginPortalExit: vi.fn(), cancelPortalExit: vi.fn() } };
+  instance.progress = { current: { resetPlay: vi.fn() } };
   instance.setState = (patch, done) => { Object.assign(instance.state, patch); done?.(); };
   return instance;
 }
@@ -84,14 +85,36 @@ describe('Home采集状态与秒表', () => {
   });
 
   it('退出guard传递取消信号及真实回执更新，localCar只停止本地采集', async () => {
-    const finish = vi.fn().mockResolvedValue(null), signal = new AbortController().signal;
-    const instance = createHome(finish);
+    const finish = vi.fn().mockResolvedValue(null), pause = vi.fn().mockResolvedValue(), signal = new AbortController().signal;
+    const instance = createHome(finish, pause);
     await instance.preparePortalExit({ signal });
     expect(finish).toHaveBeenCalledWith({ signal, onSummary: instance.applyCollectionSummary });
+    expect(pause).toHaveBeenCalledWith({ signal });
+    expect(instance.title.current.beginPortalExit.mock.invocationCallOrder[0]).toBeLessThan(finish.mock.invocationCallOrder[0]);
+    expect(instance.progress.current.resetPlay).toHaveBeenCalledOnce();
     instance.state.matrixName = 'localCar'; instance.state.colWebFlag = true;
     await instance.preparePortalExit();
     expect(instance.state.colWebFlag).toBe(false);
     expect(finish).toHaveBeenCalledOnce();
+    expect(pause).toHaveBeenCalledOnce();
+  });
+
+  it('回放尚未暂停不完成退出，暂停失败留页并释放操作锁，重试成功后复位播放条', async () => {
+    let rejectPause;
+    const pause = vi.fn().mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectPause = reject; })).mockResolvedValueOnce();
+    const instance = createHome(vi.fn().mockResolvedValue(null), pause);
+    instance.state.history = 'playback'; instance.state.local = true;
+    const pending = instance.preparePortalExit();
+    await vi.waitFor(() => expect(pause).toHaveBeenCalledOnce());
+    expect(instance.progress.current.resetPlay).not.toHaveBeenCalled();
+    const rejected = expect(pending).rejects.toThrow('暂停失败');
+    rejectPause(new Error('暂停失败'));
+    await rejected;
+    expect(instance.title.current.cancelPortalExit).toHaveBeenCalledOnce();
+    expect(instance.state.history).toBe('playback');
+    await instance.preparePortalExit();
+    expect(instance.progress.current.resetPlay).toHaveBeenCalledOnce();
+    expect(instance.state.playflag).toBe(false);
   });
 
   it('真实WS重连只同步清单与采集状态，不发送关闭串口命令', async () => {

@@ -109,6 +109,7 @@ function createHarness(name = 'Home', props = {}, overrides = {}) {
   context.getConfig = () => ({});
   context.getBuiltinSystemOptions = () => [];
   context.resolveManifestSerialSensors = () => [];
+  context.SERIAL_DETECTION_BAUD_RATES = [921600, 1000000, 1500000, 3000000, 6000000];
   context.serialFeedback = { status() {}, error() {} };
   context.requestJson = () => Promise.resolve({});
   context.storedAllowedTypes = null;

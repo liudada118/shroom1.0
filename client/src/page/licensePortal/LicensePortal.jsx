@@ -13,8 +13,9 @@ import { registerRuntimeDisplayDefinition } from '../../displays/registry';
 import { syncNativeSystemTemplates } from '../../displays/nativeSystemTemplates';
 import BRAND_LOGO_SRC from '../../assets/开屏IMG/shroom-vision-logo.png';
 import { FeedbackWidget } from './LicensePortalWidgets';
-import { PORTAL_CATEGORIES, buildPortalSystems, describeCompanySystemSync, needsCompanySystemSync, readPortalLicenseScope } from './portalSystems';
+import { PORTAL_CATEGORIES, buildPortalSystems, describeCompanySystemSync, readPortalLicenseScope } from './portalSystems';
 import { createPortalEntry } from './portalEntry';
+import { createPortalCompanySync } from './portalCompanySync';
 import PortalSystemSelector from './PortalSystemSelector';
 import './PortalFeedback.css';
 import SystemScenePreview from './scene/SystemScenePreview';
@@ -43,7 +44,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   const [staffConfigured, setStaffConfigured] = useState(false);
   const [syncStatus, setSyncStatus] = useState('');
   const [syncAttempt, setSyncAttempt] = useState(0);
-  const syncedKeyRef = useRef('');
+  const companySyncRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
@@ -70,6 +71,19 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   const selectorOpen = category !== null;
   const activeCategory = PORTAL_CATEGORIES.some((item) => item.key === category) ? category : 'all';
   const systems = useMemo(() => buildPortalSystems(t, runtimeDefinitions), [t, runtimeDefinitions]);
+  if (!companySyncRef.current) companySyncRef.current = createPortalCompanySync({
+    request: requestJson,
+    onAvailable: setManagedIds,
+    onSynced: () => setReload(value => value + 1),
+    /** 显示当前同步结果；重复授权快照不重置在途状态。 */
+    onStatus: ({ phase, result, error }) => setSyncStatus(phase === 'history'
+      ? i18n.t('monitorUi.expiredHistoryOnly')
+      : phase === 'synced' ? describeCompanySystemSync(result)
+        : phase === 'error' ? error.code === 'SYSTEM_SYNC_HTTP_ERROR'
+          ? i18n.t('monitorUi.companySyncUnavailable')
+          : i18n.t('monitorUi.companySyncError', { error: error.message || i18n.t('monitorUi.retryRefresh') })
+          : ''),
+  });
 
   /** 退出或断线只取消前端过渡，不宣称撤回后端已经确认的系统切换。 */
   const cancelNavigation = useCallback(() => {
@@ -181,6 +195,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     }
     if (data.displaySystemsUpdated) setReload((value) => value + 1);
     if (data.managedSystemAccessError) {
+      companySyncRef.current?.cancel();
       setManagedIds([]);
       setSyncStatus(data.managedSystemAccessError);
       setError(data.managedSystemAccessError);
@@ -192,6 +207,8 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     savedLicenseRef.current = { key: '', message: null, bootstrapped: false };
     setScope(undefined);
     setLicenseAccess(undefined);
+    companySyncRef.current?.cancel();
+    setManagedIds([]);
     cancelNavigation();
     entryRef.current?.invalidate();
     setError(i18n.t('monitorUi.connectionLost'));
@@ -210,42 +227,12 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     return () => controller.abort();
   }, [connected, selectorOpen, reload]);
 
-  /** On a validated key, refresh the signed company catalog without blocking local systems. */
+  /** 按授权上下文同步签名目录，相同内容的新快照不取消在途结果。 */
   useEffect(() => {
-    const requestId = `${accessKey.trim()}:${syncAttempt}:${licenseAccess?.state || 'legacy'}`;
-    if (scope === undefined || !connected || !accessKey.trim() || syncedKeyRef.current === requestId) return undefined;
-    if (!needsCompanySystemSync(scope)) {
-      syncedKeyRef.current = '';
-      setManagedIds([]);
-      setSyncStatus('');
-      return undefined;
-    }
-    syncedKeyRef.current = requestId;
-    let stopped = false;
-    if (isHistoryOnlyLicense(licenseAccess)) {
-      requestJson('/api/system-packages/status').then(status => {
-        if (!stopped && isHistoryOnlyLicense(readLicenseAccess(status))) setManagedIds(status.historyAvailable || []);
-      }).catch(() => {});
-      setSyncStatus(i18n.t('monitorUi.expiredHistoryOnly'));
-      return () => { stopped = true; };
-    }
-    requestJson('/api/system-packages/status').then((status) => {
-      if (!stopped) setManagedIds((status.available || []).map((item) => item.systemId));
-    }).catch(() => {});
-    setSyncStatus('');
-    requestJson('/api/system-packages/sync', { method: 'POST' }).then((result) => {
-      if (stopped) return;
-      setManagedIds((result.available || []).map((item) => item.systemId));
-      setSyncStatus(describeCompanySystemSync(result));
-      setReload((value) => value + 1);
-    }).catch((failure) => {
-      if (stopped) return;
-      setSyncStatus(failure.code === 'SYSTEM_SYNC_HTTP_ERROR'
-        ? i18n.t('monitorUi.companySyncUnavailable')
-        : i18n.t('monitorUi.companySyncError', { error: failure.message || i18n.t('monitorUi.retryRefresh') }));
-    });
-    return () => { stopped = true; };
+    companySyncRef.current.update({ key: accessKey, scope, connected, access: licenseAccess, attempt: syncAttempt });
   }, [scope, connected, accessKey, syncAttempt, licenseAccess]);
+
+  useEffect(() => () => companySyncRef.current?.cancel(), []);
 
   useEffect(() => {
     const timer = setInterval(() => setSyncAttempt((value) => value + 1), 6 * 60 * 60 * 1000);
@@ -303,6 +290,11 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     }
   }, [selectorOpen, cancelNavigation]);
 
+  // 列表浏览期间预载页面代码；授权和系统切换成功前不挂载，也不连接设备。
+  useEffect(() => {
+    if (selectorOpen) void Promise.resolve().then(prepareSystem).catch(() => {});
+  }, [selectorOpen, prepareSystem]);
+
   /** 编辑密钥立即撤回旧目录，并使在途验证结果失效。 */
   const changeKey = (key) => {
     keyEditedRef.current = true;
@@ -312,7 +304,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       setScope(undefined);
       setLicenseAccess(undefined);
       setManagedIds([]);
-      syncedKeyRef.current = '';
+      companySyncRef.current?.cancel();
     }
     keyRef.current = key;
     setAccessKey(key);

@@ -75,12 +75,14 @@ function parseCloseSerialRequest(body = {}) {
 function registerControlRoutes(app, {
   getPort,
   getRealtimeChannels,
+  getSerialDefaults,
   listPorts,
   logger,
   serialManager,
   controlCommandService,
   serialProtocolDirectories = [],
   serialProtocolProbeService,
+  assertCanProbe = () => {},
 }) {
   /**
    * HTTP 控制命令统一入口。
@@ -177,6 +179,7 @@ function registerControlRoutes(app, {
     const role = normalizeRole(req.query.role || req.query.portId);
     res.json(new HttpResult(0, {
       serial: role ? serialManager.getStatus(role) : serialManager.getStatus(),
+      defaults: getSerialDefaults?.() ?? null,
     }, 'success'));
   });
 
@@ -235,19 +238,26 @@ function registerControlRoutes(app, {
    * 探测服务使用隔离 raw SerialPort，不进入全局 parser、实时推送或采集存储链路。
    */
   app.post(HTTP_ROUTES.serialProtocolDetect, async (req, res) => {
+    const controller = new AbortController();
+    // 页面退出会取消请求；只释放探测句柄，不触碰已经在业务链路上的串口。
+    const cancel = () => controller.abort();
+    res.once('close', cancel);
     try {
+      assertCanProbe();
       const result = await serialProtocolProbeService.detect({
         path: req.body?.path,
         candidateIds: req.body?.candidateIds,
+        ...(req.body?.connection ? { connection: req.body.connection } : {}),
+        signal: controller.signal,
       });
-      res.json(new HttpResult(0, result, 'success'));
+      if (!controller.signal.aborted) res.json(new HttpResult(0, result, 'success'));
     } catch (error) {
       const httpStatus = Number(error.httpStatus) || 500;
       logger?.warn?.('[HTTP] serial protocol detect failed', error.message || error);
       const result = new HttpResult(1, {}, error.message || 'serial protocol detect failed');
       result.errorCode = error.code || 'SERIAL_PROTOCOL_DETECT_FAILED';
-      res.status(httpStatus).json(result);
-    }
+      if (!controller.signal.aborted) res.status(httpStatus).json(result);
+    } finally { res.removeListener('close', cancel); }
   });
 
   // 传感器类型和当前通道状态查询。

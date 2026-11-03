@@ -2,6 +2,7 @@ const assert = require('assert');
 const { EventEmitter } = require('events');
 const { createSerialManager } = require('@shroom/backend/serial/serialManager.js');
 const { normalizeSerialError } = require('@shroom/backend/serial/serialErrors.js');
+const { createSerialParserManager } = require('@shroom/backend/serial/serialParserManager.js');
 
 /** 等待真实事件循环，模拟驱动延迟。 */
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -19,8 +20,15 @@ class FakePort extends EventEmitter {
     if (!this.closeError) { this.isOpen = false; this.emit('close'); }
     callback?.(this.closeError);
   }
-  /** parser 监听由管理器安装，此处不伪造数据。 */
-  unpipe() {}
+  /** 将测试设备真实字节交给生产分帧器。 */
+  pipe(parser) {
+    this.pipedParser = parser;
+    this.pipeHandler = (data) => parser.write(data);
+    this.on('data', this.pipeHandler);
+    return parser;
+  }
+  /** 断开旧设备输入，避免重连期间污染新帧。 */
+  unpipe() { if (this.pipeHandler) this.removeListener('data', this.pipeHandler); }
 }
 
 /** 用可控硬件替身运行真实管理器。 */
@@ -77,6 +85,22 @@ async function run() {
     assert.strictEqual(b.parser.listenerCount('data'), 0);
     assert.strictEqual(b.events.filter((event) => event.error?.code === 'SERIAL_DISCONNECTED').length, 0);
     assert.strictEqual(b.manager.reconnectPort('sit').attempted, false);
+
+    const realParserManager = createSerialParserManager({ frameDelimiter: Buffer.from([0xaa, 0x55]), smallBed12BDelimiter: Buffer.from([0x0d, 0x0a]) });
+    const reconnect = fixture({ parserManager: realParserManager });
+    const frames = [];
+    realParserManager.onData('sit', (frame) => frames.push([...frame]));
+    reconnect.manager.open('sit', { path: 'COM31', baudRate: 1000000, parserChannel: 'sit' });
+    await tick(); reconnect.ports[0].finish();
+    reconnect.ports[0].emit('data', Buffer.from([99, 0xaa]));
+    reconnect.manager.open('sit', { path: 'COM31', baudRate: 921600, parserChannel: 'sit' });
+    assert.strictEqual(reconnect.ports[0].closes, 1, 'changing the rate must close the original driver');
+    assert.strictEqual(reconnect.ports[1].opens, 0, 'the replacement opens only after close settles');
+    await tick(); reconnect.ports[1].finish();
+    assert.strictEqual((await reconnect.manager.waitForOpen('sit')).baudRate, 921600);
+    reconnect.ports[0].emit('data', Buffer.from([88, 0xaa, 0x55]));
+    reconnect.ports[1].emit('data', Buffer.from([10, 11, 0xaa, 0x55]));
+    assert.deepStrictEqual(frames, [[10, 11]], 'new frames must contain neither old partial bytes nor detached device input');
 
     const c = fixture({ openTimeoutMs: 20 });
     c.manager.open('armLeft', { path: 'COM4', reconnect: true });

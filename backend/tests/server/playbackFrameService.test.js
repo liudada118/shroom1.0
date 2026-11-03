@@ -98,6 +98,12 @@ const { createLegacyGenericMatrixFrameProcessor } = require('../../extensions/bu
 const { zeroLineMatrix } = require('@shroom/backend/processing');
 const { buildSensorFrameEnvelope } = require('../../kernel/realtime/sensorFrameEnvelope');
 
+const fast256Clear = buildZeroPlaybackPayload({ sensorType: 'fast256', smallBed12BType: sensors.SMALL_BED_12B_TYPE });
+assert.deepStrictEqual(fast256Clear.sitData, new Array(256).fill(0), '16×16高速回放清屏必须恰好256个零点');
+const fast256ClearFrame = buildSensorFrameEnvelope({ channel: 'sit', sensorType: 'fast256', source: 'playback', payload: fast256Clear });
+assert.strictEqual(fast256ClearFrame.channelId, 'fast256:sit');
+assert.deepStrictEqual(fast256ClearFrame.payload.value, new Array(256).fill(0), '标准回放帧保留16×16清屏尺寸');
+
 for (const sensorType of ['bed4096', 'bed4096num']) {
   const clear = buildZeroPlaybackPayload({ sensorType, smallBed12BType: sensors.SMALL_BED_12B_TYPE });
   assert.strictEqual(clear.sitData.length, 4096, '64×64 回放清屏必须覆盖完整矩阵');

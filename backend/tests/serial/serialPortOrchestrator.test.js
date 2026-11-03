@@ -101,6 +101,22 @@ assert.deepStrictEqual(
 );
 assert.strictEqual(orchestrator.getManagedSerialPort('back').config.path, 'COM4');
 
+for (const [role, open] of [
+  ['sit', orchestrator.openSitSerialPort],
+  ['back', orchestrator.openBackSerialPort],
+  ['head', orchestrator.openHeadSerialPort],
+]) {
+  open(`COM-${role}`, 'explicit baud rate', { baudRate: 6000000 });
+  assert.strictEqual(registered.get(role).baudRate, 6000000, 'explicit rate must override the system default');
+}
+orchestrator.openManifestSerialPorts({ armLeft: 'COM6' }, 'explicit manifest rate', { baudRate: 921600 });
+assert.strictEqual(registered.get('armLeft').baudRate, 921600);
+const configurationBeforeInvalidRate = registered.get('sit');
+for (const baudRate of [0, -1, 'bad', 1.5, Infinity]) {
+  assert.throws(() => orchestrator.openSitSerialPort('COM3', 'invalid', { baudRate }), error => error.code === 'INVALID_COMMAND');
+  assert.strictEqual(registered.get('sit'), configurationBeforeInvalidRate);
+}
+
 sensorType = 'minzhen';
 orchestrator.openBackSerialPort('COM7');
 assert.strictEqual(minzhenResetCount, 1);

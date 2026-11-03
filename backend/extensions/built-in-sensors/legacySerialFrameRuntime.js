@@ -46,6 +46,44 @@ function createLegacySerialFrameRuntime(ctx) {
     handVideoRealPoint_0506_3: ctx.handVideoRealPoint_0506_3,
     isHandGloveType: ctx.isHandGloveType,
   });
+  const segmentBindings = {
+    sit: ['port1', 'firstBlueData', 'lastBlueData'],
+    back: ['port2', 'firstBlueData1', 'lastBlueData1'],
+    head: ['portHead', 'firstBlueData2', 'lastBlueData2'],
+  };
+  const segmentConnections = new Map();
+
+  /** 串口实例或系统变化时丢弃该通道首包，避免重连后拼入旧设备的半张矩阵。 */
+  function getSegmentConnection(channel) {
+    const [portKey, firstKey, lastKey] = segmentBindings[channel];
+    let connection = segmentConnections.get(channel);
+    if (!connection || connection.port !== ctx[portKey] || connection.file !== ctx.file) {
+      connection = { port: ctx[portKey], file: ctx.file, pending: new Map() };
+      segmentConnections.set(channel, connection);
+      ctx[firstKey] = [];
+      ctx[lastKey] = [];
+    }
+    return connection;
+  }
+
+  /** 缓存一份首包，并记录用于校验尾包的长度和设备类型字段。 */
+  function rememberFirstSegment(channel, buffer, firstData) {
+    getSegmentConnection(channel).pending.set(buffer[1], { length: buffer.length, firstData: [...firstData] });
+    ctx[segmentBindings[channel][1]] = firstData;
+  }
+
+  /** 同连接、同类型且长度匹配的尾包才能消费首包；重复或孤立尾包不发布数据。 */
+  function consumeFirstSegment(channel, buffer, withImu = true) {
+    const connection = getSegmentConnection(channel);
+    const pending = connection.pending.get(buffer[1]);
+    connection.pending.delete(buffer[1]);
+    const firstKey = segmentBindings[channel][1];
+    const firstData = pending?.firstData;
+    ctx[firstKey] = [];
+    const expectedLength = buffer.length - (withImu ? 16 : 0);
+    return pending?.length === expectedLength
+      && firstData?.length === expectedLength - 2 ? firstData : null;
+  }
 
   /** 发布按系统与左右手限定的设备姿态重置；身份不可解析时不广播。 */
   function publishHandReset(outputChannel, handSide) {
@@ -144,6 +182,7 @@ function createLegacySerialFrameRuntime(ctx) {
    * @param {Buffer|Uint8Array|number[]} data 串口 parser 输出的原始帧。
    */
   function handleSitSerialFrame(data) {
+    getSegmentConnection('sit');
     ctx.pointArr = new Array();
     const buffer = Buffer.from(data);
     ctx.newData = new Array();
@@ -219,17 +258,19 @@ function createLegacySerialFrameRuntime(ctx) {
     }
 
     if (buffer.length === 130) {
+      rememberFirstSegment('sit', buffer, segmentedFrameProcessor.processLeftFirstSegment(buffer).firstData);
       if (ctx.handleHandGloveDoublePacket(buffer, 'left', 'sit')) return;
-      ctx.firstBlueData = segmentedFrameProcessor.processLeftFirstSegment(buffer).firstData;
       return;
     }
 
     if (buffer.length === 142) {
-      ctx.firstBlueData = segmentedFrameProcessor.processLeftFirstSegment(buffer).firstData;
+      rememberFirstSegment('sit', buffer, segmentedFrameProcessor.processLeftFirstSegment(buffer).firstData);
       return;
     }
 
     if (buffer.length === 146 || buffer.length === 158) {
+      const firstData = consumeFirstSegment('sit', buffer);
+      if (!firstData) return;
       if (
         buffer.length === 146
         && ctx.handleHandGloveDoublePacket(buffer, 'left', 'sit')
@@ -238,7 +279,7 @@ function createLegacySerialFrameRuntime(ctx) {
       }
       const leftFrameResult = segmentedFrameProcessor.processLeftSecondSegment(buffer, {
         file: ctx.file,
-        firstData: ctx.firstBlueData,
+        firstData,
         port1: ctx.port1,
         port2: ctx.port2,
         rawPressureMode: buffer.length === 158 ? 'pressure' : undefined,
@@ -320,6 +361,7 @@ function createLegacySerialFrameRuntime(ctx) {
    * @param {Buffer|Uint8Array|number[]} data 串口 parser 输出的原始帧。
    */
   function handleBackSerialFrame(data) {
+    getSegmentConnection('back');
     ctx.pointArr2 = new Array();
     const buffer = Buffer.from(data);
     if (ctx.nowDate >= ctx.endDate) return;
@@ -361,15 +403,20 @@ function createLegacySerialFrameRuntime(ctx) {
     }
 
     if (buffer.length === 130) {
-      if (ctx.handleHandGloveDoublePacket(buffer, 'right', 'back')) return;
+      if (ctx.handleHandGloveDoublePacket(buffer, 'right', 'back')) {
+        rememberFirstSegment('back', buffer, Array.from(buffer.subarray(2)));
+        return;
+      }
+      const firstData = buffer[0] === 1 ? [] : consumeFirstSegment('back', buffer, false);
+      if (!firstData) return;
       const backFrameResult = segmentedFrameProcessor.processBack130Segment(buffer, {
         file: ctx.file,
-        firstData: ctx.firstBlueData1,
+        firstData,
         port1: ctx.port1,
         port2: ctx.port2,
       });
       if (backFrameResult.firstData) {
-        ctx.firstBlueData1 = backFrameResult.firstData;
+        rememberFirstSegment('back', buffer, backFrameResult.firstData);
         return;
       }
       ctx.lastBlueData1 = backFrameResult.lastData;
@@ -386,11 +433,13 @@ function createLegacySerialFrameRuntime(ctx) {
     }
 
     if (buffer.length === 146) {
+      const firstData = consumeFirstSegment('back', buffer);
+      if (!firstData) return;
       if (ctx.handleHandGloveDoublePacket(buffer, 'right', 'back')) return;
       const backFrameResult = segmentedFrameProcessor.processRightSecondSegment(buffer, {
         channel: 'back',
         file: ctx.file,
-        firstData: ctx.firstBlueData1,
+        firstData,
         port1: ctx.port1,
         port2: ctx.port2,
       });
@@ -474,6 +523,7 @@ function createLegacySerialFrameRuntime(ctx) {
    * @param {Buffer|Uint8Array|number[]} data 串口 parser 输出的原始帧。
    */
   function handleHeadSerialFrame(data) {
+    getSegmentConnection('head');
     ctx.pointArr4 = new Array();
     const buffer = Buffer.from(data);
     if (ctx.nowDate >= ctx.endDate) return;
@@ -499,13 +549,15 @@ function createLegacySerialFrameRuntime(ctx) {
     }
 
     if (buffer.length === 130) {
+      const firstData = buffer[0] === 1 ? [] : consumeFirstSegment('head', buffer, false);
+      if (!firstData) return;
       const headFrameResult = segmentedFrameProcessor.processHead130Segment(buffer, {
-        firstData: ctx.firstBlueData2,
+        firstData,
         port1: ctx.port1,
         port2: ctx.port2,
       });
       if (headFrameResult.firstData) {
-        ctx.firstBlueData2 = headFrameResult.firstData;
+        rememberFirstSegment('head', buffer, headFrameResult.firstData);
         return;
       }
       ctx.lastBlueData2 = headFrameResult.lastData;
@@ -522,10 +574,12 @@ function createLegacySerialFrameRuntime(ctx) {
     }
 
     if (buffer.length === 146) {
+      const firstData = consumeFirstSegment('head', buffer);
+      if (!firstData) return;
       const headFrameResult = segmentedFrameProcessor.processRightSecondSegment(buffer, {
         channel: 'head',
         file: ctx.file,
-        firstData: ctx.firstBlueData2,
+        firstData,
         port1: ctx.port1,
         port2: ctx.port2,
       });

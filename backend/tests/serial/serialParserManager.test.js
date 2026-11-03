@@ -57,4 +57,14 @@ assert.strictEqual(manager.hasChannel('custom-fixed'), true);
 assert.ok(manager.listChannels().includes('custom-delimiter'));
 assert.throws(() => manager.getParser('missing'), /unknown serial parser channel/);
 
+manager.getParser('custom-fixed').write(Buffer.from([99]));
+manager.reset('custom-fixed');
+manager.getParser('custom-fixed').write(Buffer.from([10, 11, 12]));
+assert.deepStrictEqual(fixedFrames.at(-1), [10, 11, 12]);
+manager.getParser('custom-delimiter').write(Buffer.from([99, 0xfe]));
+manager.reset('custom-delimiter');
+manager.getParser('custom-delimiter').write(Buffer.from([10, 11, 0xfe, 0xff]));
+assert.deepStrictEqual(customFrames.at(-1), [10, 11]);
+assert.strictEqual(manager.getParser('custom-delimiter').listenerCount('data'), 1, 'reset must preserve business subscriptions');
+
 console.log('serialParserManager.test.js passed');

@@ -450,21 +450,26 @@
     flex-wrap: wrap;
     gap: 4px 12px;
     padding: 6px 10px;
-    border: 1px solid #e8c7c4;
+    border: 1px solid #c9d7e2;
     border-radius: 5px;
-    background: #fff8f7;
-    color: #4c4645;
+    background: #f6f9fc;
+    color: #384a59;
     font-size: 12px;
     line-height: 20px;
     overflow-wrap: anywhere;
 
     &:empty { display: none; }
+    &:has(.is-error) { border-color: #e8c7c4; background: #fff8f7; }
     .is-error { color: #a52d25; }
 }
 
+.serial-baud-input { width: 140px; }
+.fiber-portal .portal-display-fields .serial-baud-input { width: 100%; min-width: 0; }
+
 .fiber-portal .serial-connection-status {
     background: #182530;
-    border-color: #735451;
+    border-color: #385367;
     color: #d4e3f0;
+    &:has(.is-error) { border-color: #735451; background: #182530; }
     .is-error { color: #ffb0aa; }
 }

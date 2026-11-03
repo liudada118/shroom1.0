@@ -230,6 +230,8 @@ function createSerialManager({ createSerialPort = defaultCreateSerialPort, parse
         worker.cancelled = true; detach(worker); publish(worker);
       });
       if (config.parserChannel && parserManager) {
+        // ⚠️ 换波特率或重连后不能沿用上一连接的半帧，否则第一帧会夹带旧字节。
+        parserManager.reset?.(config.parserChannel);
         worker.parser = parserManager.pipe(worker.port, config.parserChannel);
         // ⚠️ 业务回调可能同步发布首帧；先更新健康状态，避免有效首帧被采集就绪检查拒绝。
         worker.parser.prependListener('data', worker.frameHandler);

@@ -288,6 +288,9 @@ body:has(.portal-runtime-monitor.is-scene-only) * { cursor: none !important; }
   scrollbar-color: #537b99 transparent;
 }
 .fiber-portal .portal-display-panel > header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 14px; }
+@media (min-width: 821px) {
+  .fiber-portal .portal-display-panel:has(.serial-baud-input) { max-height: min(320px, calc(100dvh - 370px)); }
+}
 .fiber-portal .portal-display-panel > header .anticon { color: var(--system-accent); }
 .fiber-portal .portal-display-fields { display: grid; gap: 12px; min-width: 0; }
 .fiber-portal .portal-display-fields label { display: grid; gap: 6px; min-width: 0; color: var(--portal-secondary); font-size: 12px; }

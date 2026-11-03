@@ -61,6 +61,9 @@ function testCommandSchemaNoDrift() {
  * 断言一致。
  */
 function testBaudRateAgreement() {
+  assert.strictEqual(getSensorBaudRate('fast256'), 921600);
+  assert.strictEqual(getDefaultBaudRate('fast256'), 921600);
+  assert.strictEqual(DEFAULT_SENSOR_PROFILES.fast256.pressureLength, 256);
   const sharedTypes = Object.keys(SENSOR_DEFINITIONS).filter(
     (type) => DEFAULT_SENSOR_PROFILES[type] != null,
   );

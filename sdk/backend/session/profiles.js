@@ -10,7 +10,7 @@ function getDefaultBaudRate(sensorType = '') {
 
   if (
     HAND_GLOVE_TYPES.includes(sensorType) ||
-    ['footVideo', 'eye', 'daliegu', 'smallSample'].includes(sensorType) ||
+    ['fast256', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(sensorType) ||
     String(sensorType).includes('robot')
   ) {
     return 921600;
@@ -105,6 +105,15 @@ const DEFAULT_SENSOR_PROFILES = {
     matrixWidth: 32,
     matrixHeight: 32,
     lineOrder: 'handSinglePoint',
+  },
+  fast256: {
+    sensorType: 'fast256',
+    baudRate: getDefaultBaudRate('fast256'),
+    delimiter: STANDARD_FRAME_DELIMITER,
+    valueType: 'uint8',
+    pressureLength: 256,
+    matrixWidth: 16,
+    matrixHeight: 16,
   },
   fast1024: {
     sensorType: 'fast1024',
