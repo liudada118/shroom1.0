@@ -3,6 +3,8 @@
 > 最后更新于：2026-11-03
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
+2026-11-03 Windows 1.1.45本地交付：根package与锁文件由1.1.44递增，更新说明 `release-notes/windows/1.1.45.md`。从TEMP冻结快照重新构建NSIS，28项Python输入同哈希后复用运行时并复验health；Full非后台9项通过，后台排除快照夹具缺失及独立复查后全套126文件通过。实际产物8项模拟验收、24项交付检查与2806个NSIS文件逐项SHA256通过。文件在用户Downloads/Shroom-1.1.45；首次测试失败与复验情况详见架构维护记录及交付验收说明。未安装、未上传MinIO，密钥补登记不在本次范围。
+
 2026-11-03 默认数字首屏预填：旧宿主未提供 `serial.status.defaults` 时，`serialBaudDefaults` 按源型号立即预填实际输入值，不再依赖“系统默认”占位；新宿主配置优先。兜底仅用于显示，未编辑仍不覆盖宿主连接参数；客户端测试逐项对照生产注册表防止默认值漂移。验证 Standard 与旧接口浏览器场景。
 
 2026-11-03 波特率输入：`serial.status.defaults` 经 `server.readSerialDefaults` 返回当前系统身份/源型号/主通道默认波特率；`Title` 替换冗长识别说明为预填输入框，手动值仅传本次 `serial.open`，切系统清除并重取默认，不用旧连接记录猜默认。未编辑继续用宿主各通道默认，manifest独立配置保留。验证 serialConnectionApi / Title.serialConnection / serial-detection-portal 与 Full。
