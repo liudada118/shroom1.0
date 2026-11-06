@@ -3,7 +3,7 @@
 > 最后更新于：2026-11-06
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
-2026-11-06 Windows 1.1.48准备：根版本和锁文件递增，新增 `release-notes/windows/1.1.48.md`，用于交付启动即检查与自动下载详情；此前1.1.47安装包保留。打包完成及产物验收记录随后追加。
+2026-11-06 Windows 1.1.48交付：源码提交 `9cdd944`，新增本版说明，包含启动即检查与自动下载详情。E盘TEMP冻结1744文件后重新构建；Full9项、产物8项、交付24项、NSIS2806文件摘要及包内更新器/编译页专项通过，449个生产源码与快照一致。交付至 `C:/Users/23823/Downloads/Shroom-1.1.48`，1.1.47文件保留；未上传或安装，已有build改动未纳入源码提交。
 
 2026-11-06 安装包启动检查：`AppUpdater.startAutoCheck` 立即非阻塞检查并保留4小时周期；`update-command/getStatus` 恢复首检早于前端订阅的公开状态。`UpdateNotifier` 发现新版本直接打开下载详情，同版本关闭后不重复自动提示，迟到快照不覆盖实时状态。验证 autoUpdater / app-tools 与Full9项；此项尚未纳入先前已生成的1.1.47安装包。
 
