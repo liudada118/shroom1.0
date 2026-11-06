@@ -1,7 +1,13 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-11-03
+> 最后更新于：2026-11-06
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
+
+2026-11-06 小床面板与重复回放：`Aside` 的生命体征/告警卡按内容高度排布，避免继承220px图表高度；`PortalAlgorithmMarket.css` 按窗口高度收缩并保留内部滚动。`server.startPlaybackTimer` 在末尾重新播放时回到选区起点，开始/停止发送带系统、记录和序号的 `playbackStatus`；`Home` 过滤旧回执并同步 `Progress`，普通暂停保留位置和倍速。验证入口 bed-sidebar-status / algorithm-market-responsive / playback-restart-portal、playbackRestart / Home.playback，涉及回放执行Full。
+
+2026-11-06 Mac/中等窗口监测布局：`PortalMonitoring.css` 按CSS窗口宽度收缩左右面板，保留移动布局；`SmallBed` 的 `.portal-point-viewport` 标记安全显示区，`portalPointViewport` 用非持久化FOV/view offset避让左右栏。实际canvas始终全窗，镜头位置/目标/缩放和原采集链不变，图表隐藏、工具收起及纯点图同步释放空间。验证入口 `portalPointViewport.test` / `monitor-responsive-layout.mjs`、既有scene-only/point-buffer-entrance和Full；仅小床家族接入投影适配，其他渲染器未改。
+
+2026-11-06 Windows 1.1.46迁移交付：根版本与锁文件递增，包内更新源为 `https://images.jq-industries.com/shroom/software/`。同一套EXE/blockmap/latest/说明用于新旧两个目录，先新后旧、清单最后发布；升级后后续更新走新源，保留用户确认。Full 9项、产物8项、交付24项及NSIS2806文件摘要通过；下载目录 `Shroom-1.1.46` 含双服务器发布说明，未上传或安装，见 [更新服务器](docs/shroom-update-server.md)。
 
 2026-11-03 Windows 1.1.45本地交付：根package与锁文件由1.1.44递增，更新说明 `release-notes/windows/1.1.45.md`。从TEMP冻结快照重新构建NSIS，28项Python输入同哈希后复用运行时并复验health；Full非后台9项通过，后台排除快照夹具缺失及独立复查后全套126文件通过。实际产物8项模拟验收、24项交付检查与2806个NSIS文件逐项SHA256通过。文件在用户Downloads/Shroom-1.1.45；首次测试失败与复验情况详见架构维护记录及交付验收说明。未安装、未上传MinIO，密钥补登记不在本次范围。
 
@@ -186,7 +192,7 @@ Agent 客户交付与聊天同步：`index.js` 注入 `readStoredLicenseKey` →
 
 HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`halowService.js` 校验当前系统/授权/串口互斥；`halow.control` 走 HTTP 并等待完成，状态走 WS。原生 `humanBodyOptimized` 与副本共用 `legacySerialFrameRuntime`，保留 canonical 身份、归零与存储。前端 `HalowConnection.jsx` 同时接门户/旧工具栏。验证 `halowReceiver.test.js`、`halowControlApi.test.js`、`Title.halow.test.jsx`、`node scripts/tests/halow-connection.mjs` 和 Full；说明见 [HaLow 接入](docs/halow-human-body.md)。
 
-更新发布：`package.json` / `dev-app-update.yml` 指向 HTTPS 更新源，运行时 `app/update/autoUpdater.js`；`updaterErrors.js` 以有限错误码分类安装包失败并脱敏日志，`UpdateNotifier` 兼容旧宿主长错误、保留详情并区分网页更新。`scripts/upload-release.js` 只处理 Windows NSIS 的静态 SSH 上传，不能代替当前线上 MinIO `data/shroom1/` 发布；Mac 须另外发布正式 ZIP 和 `latest-mac.yml`。环境变量 `SHROOM_UPLOAD_DIR`、`SHROOM_SSH_KEY`；测试 `backend/tests/application/autoUpdater.test.js`、`packaging/upload-release.test.js` 和客户端 `updaterMessage.test.jsx`；涉及 Electron 更新执行 Full，当前路由与操作见 [更新服务器](docs/shroom-update-server.md)。上传和发布需显式操作。
+更新发布：`package.json` / `dev-app-update.yml` 自2026-11-06起指向 `https://images.jq-industries.com/shroom/software/`，运行时 `app/update/autoUpdater.js` 使用随包更新配置；旧安装版仍需旧入口提供过渡版本。`updaterErrors.js` 以有限错误码分类安装包失败并脱敏日志，`UpdateNotifier` 兼容旧宿主长错误、保留详情并区分网页更新。`scripts/upload-release.js` 只处理旧服务器 Windows NSIS 的静态 SSH 上传，不能用于新对象存储目录发布；Mac 须另外发布正式 ZIP 和 `latest-mac.yml`。环境变量 `SHROOM_UPLOAD_DIR`、`SHROOM_SSH_KEY`；测试 `backend/tests/application/autoUpdater.test.js`、`packaging/upload-release.test.js` 和客户端 `updaterMessage.test.jsx`；涉及 Electron 更新执行 Full，目录与迁移操作见 [更新服务器](docs/shroom-update-server.md)。上传和发布需显式操作。
 
 公司展示系统交付：`extension-host/workspace/systemPackageService.js` 按引用闭包导出/安装 Manifest 与原生模板副本，受管目录分别为 `managed-display-systems/` 和 `managed-native-systems/`；`managedSystemSync.js` 核验密钥绑定的签名目录与包，`staffPackageSubmission.js` 用 OS 加密的员工令牌提交待审包。`E:/key/server/systemPackages.ts` 管理审核、客户范围和签名下载，发布的系统可在开密钥页按系统 ID 勾选；已登记的离线 RSA 码也可在联网时按签名、客户、有效期与系统范围同步，失败原因由服务端错误码说明。门户只列客户授权且密钥勾选的受管系统，串口切换/打开与后台定时检查复核权限。Agent 成果卡片可提交或导出审核包；HTML 回退返回明确的服务未就绪提示。验证 `systemPackageService` / `managedSystemSync` / `staffPackageSubmission` 测试、`E:/key` 的 `systemPackages.test.ts` 与两库完整验证；涉及授权、包安装和跨层控制，使用 Full。操作见 [系统发布](docs/system-publishing-design.md)。
 

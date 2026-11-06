@@ -15,10 +15,11 @@ function BedSidebarFixture() {
   window.__bedSidebar = {
     setSystem,
     setState: (input) => aside.current.setState(input),
+    setLanguage: (language) => i18n.changeLanguage(language),
   };
   return <main className="fiber-portal" style={{ minHeight: '100vh', background: '#06121e' }}>
     <section className="portal-runtime-monitor"><div className="home">
-      <div className="portal-observatory" style={{ top: 24, bottom: 24 }}>
+      <div className="portal-observatory">
         <header className="portal-observatory-heading"><small>DATA OBSERVATORY</small><strong>压力数据 / 传感监测</strong></header>
         <div className="manifest-sidebar-content"><Aside key={system} ref={aside} matrixName={system} i18n={i18n} t={i18n.t.bind(i18n)} /></div>
       </div>

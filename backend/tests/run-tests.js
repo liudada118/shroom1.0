@@ -32,6 +32,7 @@ const testFiles = [
   'backend/tests/displaySystems/managedSystemSync.test.js',
   'backend/tests/http/nativeSystemsApi.test.js',
   'backend/tests/playback/playbackTiming.test.js',
+  'backend/tests/playback/playbackRestart.test.js',
   'backend/tests/agentRuntime/provider.test.js',
   'backend/tests/agentRuntime/runtime.test.js',
   'backend/tests/agentRuntime/attachments.test.js',

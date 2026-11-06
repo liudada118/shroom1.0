@@ -1,6 +1,6 @@
 {
   "name": "shroom",
-  "version": "1.1.45",
+  "version": "1.1.46",
   "description": "Shroom - Pressure Sensor Data Acquisition & Visualization System",
   "main": "app/electron/index.js",
   "win": {
@@ -273,7 +273,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://shroom.jq-industries.com/shroom1"
+        "url": "https://images.jq-industries.com/shroom/software/"
       }
     ]
   },

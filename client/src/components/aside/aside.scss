@@ -150,6 +150,52 @@
     background: transparent;
 }
 
+.bedVitalsMetrics {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 20px;
+}
+
+.bedAlertCard {
+    font-size: 30px;
+    color: #ED4F4F;
+    font-weight: bold;
+}
+
+/* 两项读数按内容排布，避免继承折线图卡的220px最小高度挤走床状态和告警。 */
+.fiber-portal .portal-runtime-monitor .home .aside > .asideContent.bedVitalsCard,
+.fiber-portal .portal-runtime-monitor .home .aside > .asideContent.bedAlertCard {
+    min-height: 0;
+    padding: 10px;
+}
+
+.fiber-portal .bedVitalsMetrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.fiber-portal .bedVitalLabel {
+    color: var(--portal-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.fiber-portal .bedVitalValue {
+    margin-top: 4px;
+    font-size: 24px;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+
+.fiber-portal .bedAlertCard {
+    font-size: 18px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
 .asideContent.bedStatusCard--warning .bedStatusHeading {
     color: #ff8e8e;
 }

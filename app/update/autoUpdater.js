@@ -24,7 +24,7 @@
  *   "build": {
  *     "publish": [{
  *       "provider": "generic",
- *       "url": "https://shroom.jq-industries.com/shroom1"
+ *       "url": "https://images.jq-industries.com/shroom/software/"
  *     }]
  *   }
  * }

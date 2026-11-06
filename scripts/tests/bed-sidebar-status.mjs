@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -22,6 +22,7 @@ const server = await createServer({ root: fileURLToPath(new URL('../../client/',
   }],
 });
 let browser;
+const layouts = [];
 try {
   await server.listen();
   browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -32,8 +33,10 @@ try {
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__bed-sidebar`);
   await page.locator('.aside .asideTitle').first().waitFor();
   for (const system of ['smallBed', 'jqbed']) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.evaluate(() => window.__bedSidebar.setLanguage('zh'));
     await page.evaluate(value => window.__bedSidebar.setSystem(value), system);
-    await page.evaluate(() => window.__bedSidebar.setState({ stateInBbed: null }));
+    await page.evaluate(() => window.__bedSidebar.setState({ stateInBbed: null, sosflag: false }));
     await page.waitForFunction(() => document.querySelectorAll('.bedStatusCard').length === 0);
     assert.match(await page.locator('.aside').innerText(), /生命体征/);
     await page.screenshot({ path: join(output, `${system}-no-empty-card.png`) });
@@ -48,9 +51,40 @@ try {
     assert.match(await card.innerText(), /坠床风险/);
     assert.equal(await card.locator('.bedStatusDuration').count(), 0);
     await page.screenshot({ path: join(output, `${system}-warning.png`) });
+
+    for (const viewport of [{ width: 1470, height: 820 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]) {
+      await page.setViewportSize(viewport);
+      for (const language of ['zh', 'en', 'ja']) {
+        await page.evaluate(value => window.__bedSidebar.setLanguage(value), language);
+        await page.evaluate(() => window.__bedSidebar.setState({ stateInBbed: 0, onBedTime: 2, rate: 18, heart_rate: 72.4, sosflag: true }));
+        await page.locator('.bedAlertCard').waitFor();
+        assert.deepEqual(await page.locator('.bedVitalValue').allTextContents().then(values => values.map(value => value.trim())), ['18', '72']);
+        const layout = await page.evaluate(() => {
+          const aside = document.querySelector('.aside'), vitals = document.querySelector('.bedVitalsCard');
+          const alert = document.querySelector('.bedAlertCard');
+          return { vitalsHeight: vitals.getBoundingClientRect().height, alertHeight: alert.getBoundingClientRect().height,
+            overflow: aside.scrollWidth > aside.clientWidth,
+            alertVisible: alert.getBoundingClientRect().bottom <= aside.getBoundingClientRect().bottom + 1 };
+        });
+        assert.ok(layout.vitalsHeight < 140, `${system}/${language}: 生命体征仅占读数实际所需高度 ${layout.vitalsHeight}`);
+        assert.ok(layout.alertHeight < 120 && !layout.overflow, `${system}/${language}: 告警不继承220px高度且不横向裁剪`);
+        if (viewport.height >= 820 || language === 'zh') assert.equal(layout.alertVisible, true, `${system}/${language}: 常见桌面窗口完整显示床状态和告警`);
+        await page.locator('.bedAlertCard').scrollIntoViewIfNeeded();
+        const alertBounds = await page.locator('.bedAlertCard').evaluate(node => {
+          const bounds = node.getBoundingClientRect(), outer = node.closest('.aside').getBoundingClientRect();
+          return { top: bounds.top, bottom: bounds.bottom, outerTop: outer.top, outerBottom: outer.bottom };
+        });
+        assert.ok(alertBounds.top >= alertBounds.outerTop - 2 && alertBounds.bottom <= alertBounds.outerBottom + 2,
+          `${system}/${language}/${viewport.height}: 较矮窗口中的告警仍可完整滚动查看 ${JSON.stringify(alertBounds)}`);
+        await page.locator('.aside').evaluate(node => { node.scrollTop = 0; });
+        layouts.push({ system, language, ...viewport, ...layout });
+        if (viewport.width === 1470 && language === 'zh') await page.screenshot({ path: join(output, `${system}-compact-vitals.png`) });
+      }
+    }
   }
   await page.setViewportSize({ width: 390, height: 844 });
   assert(await page.locator('.aside').evaluate(node => node.scrollWidth <= node.clientWidth));
   assert.deepEqual(errors, []);
+  await writeFile(join(output, 'layouts.json'), JSON.stringify(layouts, null, 2));
   console.log(`Bed sidebar browser checks passed; synthetic states only; screenshots: ${output}`);
 } finally { await browser?.close(); await server.close(); }

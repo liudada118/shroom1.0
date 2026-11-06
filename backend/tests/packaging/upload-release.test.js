@@ -15,7 +15,7 @@ function fixture(t) {
   const dist = path.join(root, "dist");
   fs.mkdirSync(path.join(dist, "win-unpacked", "resources"), { recursive: true });
   fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ version: "1.2.3", build: {
-    publish: [{ provider: "generic", url: "https://shroom.jq-industries.com/shroom1" }],
+    publish: [{ provider: "generic", url: "https://images.jq-industries.com/shroom/software/" }],
   } }));
   const installer = "Shroom Setup 1.2.3.exe";
   const bytes = Buffer.from("test installer");
@@ -26,7 +26,7 @@ function fixture(t) {
     `sha512: ${crypto.createHash("sha512").update(bytes).digest("base64")}`, "",
   ].join("\r\n"));
   fs.writeFileSync(path.join(dist, "win-unpacked", "resources", "app-update.yml"),
-    "provider: generic\r\nurl: https://shroom.jq-industries.com/shroom1\r\n");
+    "provider: generic\r\nurl: https://images.jq-industries.com/shroom/software/\r\n");
   return { root, dist, installer };
 }
 
@@ -41,7 +41,7 @@ test("valid CRLF Windows release selects only the three update files", async (t)
 test("rejects a build that still points to the previous update server", async (t) => {
   const { root, dist } = fixture(t);
   fs.writeFileSync(path.join(dist, "win-unpacked", "resources", "app-update.yml"),
-    "url: http://sensor.bodyta.com/shroom1\n");
+    "url: https://shroom.jq-industries.com/shroom1\n");
   await assert.rejects(inspectRelease(root), /different update URL/);
 });
 

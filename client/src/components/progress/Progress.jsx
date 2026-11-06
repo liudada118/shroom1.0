@@ -276,8 +276,8 @@ const ProgressCom = React.forwardRef((props, refs) => {
     }, [playFlag, leftFlag, rightFlag, lineFlag])
 
     const playData = (value) => {
-        props.wsSendObj({ play: value })
         setPlayFlag(value)
+        props.wsSendObj({ play: value })
     };
 
     const changeIndex = (value) => {

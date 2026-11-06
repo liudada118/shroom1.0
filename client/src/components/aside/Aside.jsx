@@ -1489,24 +1489,24 @@ class Aside extends React.Component {
                     </>
                     : ['jqbed', 'smallBed'].includes(this.props.matrixName) ?
                     <>
-                        <div className="asideContent firstAside">
+                        <div className="asideContent firstAside bedVitalsCard">
                             <h2 className="asideTitle">{this.props.i18n.t('vitalSigns')}</h2>
-                            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-around' }}>
+                            <div className="bedVitalsMetrics">
                                 <div>
-                                    <div>
+                                    <div className="bedVitalLabel">
                                         {this.props.i18n.t('respiration')}
                                     </div>
-                                    <div>
+                                    <div className="bedVitalValue">
                                         {
                                             this.state.rate
                                         }
                                     </div>
                                 </div>
                                 <div>
-                                    <div>
+                                    <div className="bedVitalLabel">
                                         {this.props.i18n.t('heartRate')}
                                     </div>
-                                    <div>
+                                    <div className="bedVitalValue">
                                         {
                                             this.state.heart_rate != null && this.state.heart_rate !== '--' ? Math.round(this.state.heart_rate) : '--'
                                         }
@@ -1520,7 +1520,7 @@ class Aside extends React.Component {
                             {(this.state.stateInBbed == 1 || this.state.stateInBbed == 0) ? <div className="bedStatusDuration">{this.state.stateInBbed == 1 ? this.props.i18n.t('inBedDuration') : this.props.i18n.t('leaveBedDuration')} : {secondsToHMS(this.state.onBedTime)}</div> : null}
                         </div>}
                         {
-                            this.state.sosflag ? <div className="asideContent firstAside" style={{ fontSize: '30px', color: '#ED4F4F', fontWeight: 'bold' }}>{this.props.i18n.t('sos')}</div> : ''
+                            this.state.sosflag ? <div className="asideContent firstAside bedAlertCard">{this.props.i18n.t('sos')}</div> : ''
                         }
                     </>
                     : this.props.matrixName != 'bed40' ?

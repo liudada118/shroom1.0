@@ -2,6 +2,7 @@ import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
 import { createPointViewTools } from './pointViewTools';
 import { installParticleEntrance } from '../../renderers/particleEntrance';
+import { fitPortalPointViewport } from '../../renderers/portalPointViewport';
 import { createEdgeBufferPoints } from '@shroom/frontend/renderers/pointGrid/react/edgeBufferPoints.js';
 import { normalizeEdgeBuffer } from '@shroom/frontend/renderers/pointGrid/core/edgeBuffer.js';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -35,6 +36,7 @@ const RAW_ASIDE_MATRIX_TYPES = new Set(['smallBed12B', 'smallBedNoAlg']);
 
 const Canvas = React.forwardRef((props, refs) => {
   const workspaceViewRef = useRef(null);
+  const portalResizeRef = useRef(null);
 
   let dataArr
 const group = new THREE.Group();
@@ -110,6 +112,7 @@ let isShiftPressed = false;
 
   let camera, scene, renderer;
   let disposeParticleEntrance, portalResizeObserver;
+  let portalViewport, portalViewDistance;
   let edgeBufferPoints;
   let controls;
   let cube, chair, mixer, clips;
@@ -236,6 +239,8 @@ let isShiftPressed = false;
       disposeParticleEntrance = installParticleEntrance(renderer, scene, camera, particles, { rows: AMOUNTX, cols: AMOUNTY });
       portalResizeObserver = new ResizeObserver(onWindowResize);
       portalResizeObserver.observe(container);
+      portalViewport = container.parentElement.querySelector('.portal-point-viewport');
+      if (portalViewport) portalResizeObserver.observe(portalViewport);
       onWindowResize();
     }
 
@@ -523,6 +528,13 @@ let isShiftPressed = false;
 
     // camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+    if (portalViewport && portalViewDistance) {
+      fitPortalPointViewport({ camera, canvas: renderer.domElement.getBoundingClientRect(),
+        viewport: portalViewport.getBoundingClientRect(), distance: portalViewDistance,
+        planeWidth: (AMOUNTX - 1 + edgeBufferRef.current * 2 * xStretch) * SEPARATION * particles.scale.x,
+        planeDepth: (AMOUNTY - 1 + edgeBufferRef.current * 2) * SEPARATION * particles.scale.z });
+    }
+    controls?.handleResize();
   }
 
   //模型动画
@@ -773,7 +785,10 @@ let isShiftPressed = false;
   function sitValue(prop) {
 
     const { valuej, valueg, value, valuel, valuef, valuelInit, ymax, compen, press, edgeBuffer } = prop;
-    if (edgeBuffer !== undefined) edgeBufferRef.current = normalizeEdgeBuffer(edgeBuffer, edgeBufferRef.current);
+    if (edgeBuffer !== undefined) {
+      edgeBufferRef.current = normalizeEdgeBuffer(edgeBuffer, edgeBufferRef.current);
+      portalResizeRef.current?.();
+    }
     if (valuej !== undefined) valuej1 = valuej;
     if (valueg !== undefined) valueg1 = valueg;
     if (value !== undefined) value1 = value;
@@ -927,6 +942,9 @@ let isShiftPressed = false;
       localCenter: new THREE.Vector3(-SEPARATION / 2, 0, -SEPARATION / 2) });
     // 首帧直接俯视，并以该镜头保存复位快照，避免恢复到旧斜视位置。
     workspaceViewRef.current.top();
+    portalViewDistance = camera.position.distanceTo(controls.target);
+    portalResizeRef.current = onWindowResize;
+    if (props.portalEmbedded) onWindowResize();
     controls.target0.copy(controls.target);
     controls.position0.copy(camera.position);
     controls.up0.copy(camera.up);
@@ -944,6 +962,7 @@ let isShiftPressed = false;
       workspaceViewRef.current?.dispose();
       workspaceViewRef.current = null;
       portalResizeObserver?.disconnect();
+      portalResizeRef.current = null;
       controls?.dispose();
       document.removeEventListener('pointerdown', pointDown)
       document.removeEventListener('pointermove', pointMove)
@@ -959,7 +978,9 @@ let isShiftPressed = false;
     };
   }, []);
   return (
-    <div style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}>
+    <div className={props.portalEmbedded ? 'portal-fitted-point-scene' : undefined}
+      style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}>
+      {props.portalEmbedded && <div className="portal-point-viewport" aria-hidden="true" />}
       <div
         style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}
         id={`canvas`}

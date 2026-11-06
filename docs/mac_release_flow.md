@@ -6,7 +6,7 @@
 
 - 正式 mac 发版命令: `npm run build-mac-release`
 - 内部分发测试命令: `npm run build-mac-share`
-- 当前更新源: `https://shroom.jq-industries.com/shroom1`
+- 当前更新源: `https://images.jq-industries.com/shroom/software/`
 
 不适用范围:
 
@@ -32,7 +32,7 @@
    ```json
    {
      "provider": "generic",
-     "url": "https://shroom.jq-industries.com/shroom1"
+     "url": "https://images.jq-industries.com/shroom/software/"
    }
    ```
 
@@ -264,7 +264,7 @@ dist/latest-mac.yml
 当前仓库配置下，上传位置对应:
 
 ```text
-https://shroom.jq-industries.com/shroom1
+https://images.jq-industries.com/shroom/software/
 ```
 
 如果只想给用户一个手动安装包，再额外上传 DMG 即可。

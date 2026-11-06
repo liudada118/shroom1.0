@@ -1651,6 +1651,8 @@ class Home extends React.Component {
     ws = createJsonWebSocket(WS_URLS.MAIN);
     // 坐垫、靠背和头枕共用这一条连接，按消息字段或订阅通道区分。
     ws.onopen = () => {
+      this._playbackStatus = null;
+      this._playbackStatusSequence = 0;
       // connection opened
       console.info("connect success");
       this.jqbedAlarmSpeechState?.reset();
@@ -2051,12 +2053,33 @@ class Home extends React.Component {
     });
   };
 
+  /** 仅将当前系统、当前记录的最新播放状态同步到按钮和时间轴。 */
+  applyPlaybackStatus = (status) => {
+    if (!status || typeof status.playing !== 'boolean' || !Number.isSafeInteger(status.sequence)
+      || status.sequence <= (this._playbackStatusSequence || 0) || !this.state.local
+      || status.systemId !== (this.state.systemId || this.state.matrixName)
+      || String(status.recordKey) !== String(this.state.dataTime)) return;
+    this._playbackStatusSequence = status.sequence;
+    this._playbackStatus = status;
+    this.progress.current?.setPlaying(status.playing);
+    if (Number.isSafeInteger(status.index) && status.index >= 0) this.progress.current?.changeIndex(status.index);
+  };
+
+  /** 加载的HTTP回执不能覆盖已先到达的自然结束状态（例如单帧记录）。 */
+  syncPlaybackStarted = () => {
+    const status = this._playbackStatus;
+    const current = status && status.systemId === (this.state.systemId || this.state.matrixName)
+      && String(status.recordKey) === String(this.state.dataTime);
+    this.progress.current?.setPlaying(current ? status.playing : true);
+  };
+
   wsData = (e, decodedMessage = null) => {
     // A replaced socket may still dispatch a queued message; it cannot update the current session.
     if (e.target && e.target !== ws) return;
     sitPress = 0;
     const jsonObject = decodedMessage || parseWebSocketEventPayload(e);
     if (!jsonObject) return;
+    if (jsonObject.playbackStatus) this.applyPlaybackStatus(jsonObject.playbackStatus);
     const nextLicenseAccess = readLicenseAccess(jsonObject);
     const effectiveLicenseAccess = nextLicenseAccess === undefined ? this.state.licenseAccess : nextLicenseAccess;
     const historyOnly = isHistoryOnlyLicense(effectiveLicenseAccess);
@@ -5482,7 +5505,7 @@ class Home extends React.Component {
             portalChartsVisible={this.props.portalChartsVisible}
             onPortalChartsToggle={this.props.onPortalChartsToggle}
             onPortalResetPlayback={() => this.progress.current?.resetPlay()}
-            onPortalPlaybackStarted={() => this.progress.current?.setPlaying(true)}
+            onPortalPlaybackStarted={this.syncPlaybackStarted}
             portalSelectionActive={this.state.selectFlag}
             onPortalSelectionChange={this.changePortalSelection}
             portalAlgorithmMarketOpen={this.state.portalAlgorithmMarketOpen}

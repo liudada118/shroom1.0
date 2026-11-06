@@ -931,12 +931,31 @@ function publishPlaybackFrame(index, options = {}) {
   if (sitPayload) publishRealtimeFrame('sit', sitPayload, { source: 'playback' });
 }
 
+let playbackStatusSequence = 0;
+
+/** 读取有效播放区间；沿用旧区间末端加一帧的取数约定。 */
+function getPlaybackRange() {
+  const range = getPlaybackState('indexArr') || [0, length - 1];
+  const end = Math.min(length - 1, Math.max(0, Number(range[1]) || 0) + 1);
+  return { start: Math.min(end, Math.max(0, Number(range[0]) || 0)), end };
+}
+
+/** 广播真实播放状态，记录身份和递增序号用于丢弃过期的界面回执。 */
+function publishPlaybackStatus() {
+  publishSystemEvent({ playbackStatus: {
+    systemId: zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()),
+    recordKey: getTime,
+    sequence: ++playbackStatusSequence,
+    playing: Boolean(playFlag),
+    index: getPlaybackState('nowIndex'),
+  } });
+}
+
 const playbackTimer = createPlaybackTimerService({
   getInterval: () => interval,
   onTick: (steps) => {
     const currentIndex = getPlaybackState('nowIndex');
-    const currentRange = getPlaybackState('indexArr');
-    const lastIndex = Math.min(length - 1, currentRange[1] + 1);
+    const { end: lastIndex } = getPlaybackRange();
     if (currentIndex < lastIndex) {
       const nextIndex = Math.min(currentIndex + steps, lastIndex);
       setPlaybackState('nowIndex', nextIndex);
@@ -947,6 +966,7 @@ const playbackTimer = createPlaybackTimerService({
   },
   onStop: () => {
     playFlag = false;
+    publishPlaybackStatus();
   },
 });
 
@@ -1196,7 +1216,16 @@ function stopPlaybackTimer() {
  * @returns {void}
  */
 function startPlaybackTimer() {
+  if (length <= 0) { stopPlaybackTimer(); return; }
+  const { start, end } = getPlaybackRange();
+  const index = getPlaybackState('nowIndex');
+  // ⚠️ 播完后只重置播放位置；普通暂停续播必须保留当前位置、选区和倍速。
+  if (index >= end || index < start) {
+    setPlaybackState('nowIndex', start);
+    publishPlaybackFrame(start);
+  }
   playFlag = true;
+  publishPlaybackStatus();
   playbackTimer.start();
 }
 

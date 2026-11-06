@@ -124,7 +124,7 @@ async function main() {
     console.error(`Temporary files may remain in ${stage}. Inspect that directory before removing it.`);
     throw error;
   }
-  console.log(`Published. Verify the public endpoint: ${release.url}/latest.yml`);
+  console.log(`Published. Verify the public endpoint: ${release.url.replace(/\/$/, "")}/latest.yml`);
 }
 
 if (require.main === module) {
