@@ -13,6 +13,10 @@ const updateListeners = new Set();
 const serviceListeners = new Set();
 const serviceState = { frontend: { activeReleaseId: 1 }, usage: { enabled: true, queued: 0 } };
 const calls = [];
+const fixtureParams = new URLSearchParams(location.search);
+const startupUpdate = fixtureParams.has('startupUpdate')
+  ? { type: 'update-available', version: '9.0.0', releaseNotes: '启动前已发现的新版本' } : null;
+let resolveUpdateStatus;
 const snapshot = { settings: { baseUrl: 'https://example.invalid', model: 'fixture', hasApiKey: true },
   conversation: { id: 'layout-fixture', messages: [], tasks: [] }, attachments: [], activeTask: null };
 window.electronAPI = {
@@ -21,7 +25,14 @@ window.electronAPI = {
   /** 更新订阅只接收本页合成事件。 */
   on(_channel, listener) { updateListeners.add(listener); return () => updateListeners.delete(listener); },
   /** 只记录点击行为，不连接更新服务器。 */
-  async invoke(channel, payload) { calls.push({ channel, ...payload }); },
+  async invoke(channel, payload) {
+    calls.push({ channel, ...payload });
+    if (payload.action === 'getStatus') {
+      if (fixtureParams.has('legacyUpdater')) throw new Error('Unsupported update action');
+      if (fixtureParams.has('deferUpdateStatus')) return new Promise(resolve => { resolveUpdateStatus = resolve; });
+      return startupUpdate;
+    }
+  },
   services: {
     subscribe(listener) { serviceListeners.add(listener); return () => serviceListeners.delete(listener); },
     async invoke(action, input) {
@@ -42,6 +53,8 @@ window.electronAPI = {
 };
 window.appToolsFixture = {
   calls,
+  /** 延迟旧快照，检查实时事件到达后不会被过期回执覆盖。 */
+  resolveStatus(data) { resolveUpdateStatus?.(data); },
   /** 模拟更新进度，不触发下载或安装。 */
   update(data) { updateListeners.forEach((listener) => listener(data)); },
   /** 检查任务状态圆点不会改变工具组尺寸。 */

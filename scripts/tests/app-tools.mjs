@@ -22,6 +22,47 @@ try {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   const url = `http://127.0.0.1:${server.httpServer.address().port}/src/components/appTools/__fixtures__/tools.html`;
+  const startup = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  startup.on('pageerror', error => errors.push(error.message));
+  await startup.goto(`${url}?startupUpdate`);
+  const startupDialog = startup.getByRole('dialog', { name: /安装包更新|软件更新/ });
+  await startupDialog.waitFor();
+  assert.match(await startupDialog.innerText(), /9\.0\.0/);
+  assert.match(await startupDialog.innerText(), /启动前已发现的新版本/);
+  assert.equal(await startup.evaluate(() => window.appToolsFixture.calls.filter(call => ['checkForUpdate', 'downloadUpdate'].includes(call.action)).length), 0,
+    '恢复启动结果只读缓存，不重复检查或自动下载');
+  await startup.screenshot({ path: join(artifacts, 'startup-update-dialog.png') });
+  await startupDialog.getByRole('button', { name: /^关\s*闭$/ }).click();
+  await startupDialog.waitFor({ state: 'hidden' });
+  await startup.evaluate(() => window.appToolsFixture.update({ type: 'update-available', version: '9.0.0', releaseNotes: '启动前已发现的新版本' }));
+  await startup.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await startupDialog.isVisible(), false, '同一版本关闭后不重复弹出');
+  await startup.locator('.shroom-app-update-status-button').click();
+  await startupDialog.getByRole('button', { name: /下载更新/ }).click();
+  await startup.waitForFunction(() => document.querySelector('.shroom-app-update')?.dataset.state === 'downloading');
+  assert.equal(await startup.evaluate(() => window.appToolsFixture.calls.filter(call => call.action === 'downloadUpdate').length), 1,
+    '点击下载才发送一次下载命令');
+
+  await startup.goto(`${url}?deferUpdateStatus`);
+  await startup.waitForFunction(() => window.appToolsFixture?.calls.some(call => call.action === 'getStatus'));
+  await startup.evaluate(() => window.appToolsFixture.update({ type: 'download-progress', percent: 42, version: '9.1.0', releaseNotes: '新的下载状态' }));
+  await startup.waitForFunction(() => document.querySelector('.shroom-app-update')?.dataset.state === 'downloading');
+  await startup.evaluate(() => window.appToolsFixture.resolveStatus({ type: 'update-available', version: '9.0.0', releaseNotes: '过期快照' }));
+  await startup.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await startupDialog.isVisible(), false, '迟到旧快照不能覆盖实时下载或误弹旧版详情');
+  assert.equal(await startup.locator('.shroom-app-update').getAttribute('data-state'), 'downloading');
+  await startup.locator('.shroom-app-update-status-button').click();
+  assert.match(await startupDialog.innerText(), /9\.1\.0/);
+  assert.match(await startupDialog.innerText(), /新的下载状态/);
+  assert.doesNotMatch(await startupDialog.innerText(), /过期快照/);
+
+  await startup.goto(`${url}?legacyUpdater`);
+  await startup.waitForFunction(() => window.appToolsFixture?.calls.some(call => call.action === 'getStatus'));
+  await startup.evaluate(() => window.appToolsFixture.update({ type: 'update-available', version: '9.2.0' }));
+  await startupDialog.waitFor();
+  assert.match(await startupDialog.innerText(), /9\.2\.0/);
+  await startup.close();
+  console.log('STARTUP_UPDATE_PASS: early snapshot, automatic details, explicit download, duplicate version, stale snapshot, legacy host');
   await page.goto(url);
   const dock = page.locator('.shroom-app-tools');
   const agent = dock.locator('.shroom-agent-entry');
@@ -125,6 +166,11 @@ try {
     await collapse();
     await page.evaluate((data) => window.appToolsFixture.update(data), event);
     await page.waitForFunction((expected) => document.querySelector('.shroom-app-update')?.dataset.state === expected, state);
+    const autoDetails = page.getByRole('dialog', { name: /安装包更新|软件更新/ });
+    if (state === 'available' && await autoDetails.isVisible()) {
+      await autoDetails.getByRole('button', { name: /^关\s*闭$/ }).click();
+      await autoDetails.waitFor({ state: 'hidden' });
+    }
     const statusButton = dock.locator('.shroom-app-update-status-button');
     await statusButton.waitFor();
     assert.equal(await statusButton.getAttribute('aria-haspopup'), 'dialog');
@@ -272,6 +318,15 @@ try {
     await collapse();
     await page.evaluate((data) => window.appToolsFixture.update(data), event);
     await page.waitForFunction(() => document.querySelector('.shroom-app-update-status .ant-tag')?.textContent.length > 0);
+    if (event.type === 'update-available') {
+      const details = page.getByRole('dialog', { name: /安装包更新|软件更新/ });
+      await details.waitFor();
+      assert.ok(await details.getByRole('button', { name: /下载更新/ }).isVisible(), '发现更新直接打开下载详情');
+      assert.equal(await page.evaluate(() => window.appToolsFixture.calls.filter(call => call.action === 'downloadUpdate').length), 0,
+        '打开下载弹窗不会自行下载');
+      await details.getByRole('button', { name: /^关\s*闭$/ }).click();
+      await details.waitFor({ state: 'hidden' });
+    }
     assert.equal(await dock.getAttribute('data-expanded'), 'false', '更新事件不会强制展开横幅');
     assert.ok(await dock.getByRole('status').isVisible(), '折叠后仍可收到并显示更新状态');
     await page.setViewportSize({ width: 320, height: 844 });

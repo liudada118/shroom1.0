@@ -13,7 +13,7 @@
  *   <UpdateNotifier />
  */
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { createPortal } from 'react-dom';
 import { Modal, Progress, Button, notification, Tag } from "antd";
 import { useTranslation } from "react-i18next";
@@ -81,6 +81,7 @@ export default function UpdateNotifier({ statusContainer, onAfterDialogClose } =
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadDetail, setDownloadDetail] = useState({});
   const [showModal, setShowModal] = useState(false);
+  const promptedVersion = useRef(null);
   const releaseNotesText = normalizeReleaseNotes(updateInfo.releaseNotes);
 
   // 检查 electronAPI 是否可用
@@ -90,7 +91,12 @@ export default function UpdateNotifier({ statusContainer, onAfterDialogClose } =
   useEffect(() => {
     if (!isElectron) return;
 
-    const unsubscribe = window.electronAPI.on("update-status", (data) => {
+    let disposed = false;
+    let receivedLiveStatus = false;
+
+    /** Apply live or restored status; each new version opens its download details once per mount. */
+    const applyStatus = (data, notify = true) => {
+      if (!data?.type) return;
       switch (data.type) {
         case "checking-for-update":
           setUpdateState(UPDATE_STATE.CHECKING);
@@ -103,20 +109,16 @@ export default function UpdateNotifier({ statusContainer, onAfterDialogClose } =
             releaseDate: data.releaseDate,
             releaseNotes: data.releaseNotes,
           });
-          // 弹出通知
-          notification.info({
-            message: t("update.foundTitle"),
-            description: t("update.foundDescription", { version: data.version }),
-            icon: <RocketOutlined style={{ color: "#1890ff" }} />,
-            duration: 10,
-            onClick: () => setShowModal(true),
-          });
+          if (promptedVersion.current !== data.version) {
+            promptedVersion.current = data.version;
+            setShowModal(true);
+          }
           break;
 
         case "update-not-available":
           setUpdateState(UPDATE_STATE.NOT_AVAILABLE);
           setUpdateInfo({ version: data.version });
-          notification.success({
+          if (notify) notification.success({
             message: t("update.latestTitle"),
             description: t("update.latestDescription", { version: data.version }),
             icon: <CheckCircleOutlined style={{ color: "#52c41a" }} />,
@@ -126,6 +128,9 @@ export default function UpdateNotifier({ statusContainer, onAfterDialogClose } =
 
         case "download-progress":
           setUpdateState(UPDATE_STATE.DOWNLOADING);
+          if (data.version) setUpdateInfo((prev) => ({ ...prev,
+            version: data.version, releaseDate: data.releaseDate ?? prev.releaseDate,
+            releaseNotes: data.releaseNotes ?? prev.releaseNotes }));
           setDownloadProgress(data.percent || 0);
           setDownloadDetail({
             transferred: data.transferred,
@@ -136,14 +141,16 @@ export default function UpdateNotifier({ statusContainer, onAfterDialogClose } =
 
         case "update-downloaded":
           setUpdateState(UPDATE_STATE.DOWNLOADED);
-          setUpdateInfo((prev) => ({ ...prev, version: data.version }));
+          setUpdateInfo((prev) => ({ ...prev, version: data.version,
+            releaseDate: data.releaseDate ?? prev.releaseDate,
+            releaseNotes: data.releaseNotes ?? prev.releaseNotes }));
           setDownloadProgress(100);
           break;
 
         case "update-error":
           setUpdateState(UPDATE_STATE.ERROR);
           setUpdateInfo((prev) => ({ ...prev, error: updaterErrorKey(data) }));
-          notification.error({
+          if (notify) notification.error({
             message: t("update.checkFailed"),
             description: t(updaterErrorKey(data)),
             icon: <ExclamationCircleOutlined style={{ color: "#ff4d4f" }} />,
@@ -154,9 +161,26 @@ export default function UpdateNotifier({ statusContainer, onAfterDialogClose } =
         default:
           break;
       }
+    };
+
+    const unsubscribe = window.electronAPI.on("update-status", (data) => {
+      receivedLiveStatus = true;
+      applyStatus(data);
     });
 
+    /** Restore an early startup result without letting a late snapshot replace newer live events. */
+    const restoreStatus = async () => {
+      try {
+        const data = await window.electronAPI.invoke("update-command", { action: "getStatus" });
+        if (!disposed && !receivedLiveStatus) applyStatus(data, false);
+      } catch {
+        // Older hosts do not expose a cached update status; their live events remain supported.
+      }
+    };
+    void restoreStatus();
+
     return () => {
+      disposed = true;
       if (typeof unsubscribe === "function") {
         unsubscribe();
       }

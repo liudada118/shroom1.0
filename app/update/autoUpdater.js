@@ -66,7 +66,8 @@ class AppUpdater {
     this.platform = options.platform || process.platform;
     this.checkInterval = options.checkInterval || 4 * 60 * 60 * 1000;
     this._timer = null;
-    this._startupCheckTimer = null;
+    this._status = null;
+    this._releaseInfo = null;
     this._installRequested = false;
     this._beforeInstall = typeof options.beforeInstall === "function" ? options.beforeInstall : null;
     this._onInstallRequested = options.onInstallRequested;
@@ -158,6 +159,8 @@ class AppUpdater {
       this._sendStatus({
         type: "update-downloaded",
         version: info.version,
+        releaseDate: info.releaseDate,
+        releaseNotes: info.releaseNotes,
       });
 
       // 弹出对话框询问用户是否立即安装
@@ -191,6 +194,8 @@ class AppUpdater {
     ipcMain.handle("update-command", async (event, data) => {
       try {
         switch (data?.action) {
+          case "getStatus":
+            return this.getStatus();
           case "checkForUpdate":
             logger.info("[Updater] 收到前端检查更新请求");
             return await this.checkForUpdates();
@@ -222,6 +227,20 @@ class AppUpdater {
       if (this._lastError?.fingerprint === fingerprint && Date.now() - this._lastError.at < 1000) return;
       this._lastError = { fingerprint, at: Date.now() };
     } else if (data.type === 'checking-for-update') this._lastError = null;
+    if (data.type === 'update-available' || data.type === 'update-downloaded') {
+      const previous = this._releaseInfo?.version === data.version ? this._releaseInfo : null;
+      this._releaseInfo = {
+        ...previous,
+        ...Object.fromEntries(['version', 'releaseDate', 'releaseNotes']
+          .filter(key => data[key] !== undefined).map(key => [key, data[key]])),
+      };
+    } else if (data.type === 'update-not-available') this._releaseInfo = null;
+    const status = {
+      ...(['download-progress', 'update-downloaded', 'installing-update'].includes(data.type) ? this._releaseInfo : null),
+      ...Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined)),
+    };
+    // ⚠️ 首次检查可早于页面订阅，缓存公开状态才能在页面就绪后恢复更新提示。
+    this._status = JSON.parse(JSON.stringify(status));
     if (data.type === 'update-downloaded') this._downloadedVersion = data.version;
     const observed = {
       'checking-for-update': ['check', 'unknown'], 'update-available': ['update_available', 'success'],
@@ -232,8 +251,13 @@ class AppUpdater {
       featureId: 'software_update', action: observed[0], result: observed[1],
       ...(data.type === 'update-error' ? { errorCode: data.code || 'SOFTWARE_UPDATE_FAILED' } : {}) });
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send("update-status", data);
+      this.mainWindow.webContents.send("update-status", this.getStatus());
     }
+  }
+
+  /** Read the latest public state without starting a check or recording another event. */
+  getStatus() {
+    return this._status === null ? null : JSON.parse(JSON.stringify(this._status));
   }
 
   /**
@@ -290,9 +314,12 @@ class AppUpdater {
     return this._installRequested;
   }
 
+  /** Report automatic-check failures even when the engine only rejects its promise. */
   _safeCheckForUpdates() {
     return this.checkForUpdates().catch((err) => {
-      logger.error("[Updater] checkForUpdates rejected:", describeUpdaterError(err, this.platform));
+      const failure = describeUpdaterError(err, this.platform);
+      logger.error("[Updater] checkForUpdates rejected:", failure);
+      this._sendStatus({ type: 'update-error', ...failure });
       return null;
     });
   }
@@ -301,20 +328,15 @@ class AppUpdater {
    * 启动定时检查
    */
   startAutoCheck() {
-    if (this._timer || this._startupCheckTimer) {
+    if (this._timer !== null) {
       return;
     }
 
-    // 启动后延迟 30 秒检查第一次（避免影响启动速度）
-    this._startupCheckTimer = setTimeout(() => {
-      this._startupCheckTimer = null;
-      this._safeCheckForUpdates();
-    }, 30 * 1000);
-
-    // 之后按间隔定时检查
+    // 先登记周期任务，防止首次检查同步发出的事件重复启动检查。
     this._timer = setInterval(() => {
-      this._safeCheckForUpdates();
+      void this._safeCheckForUpdates();
     }, this.checkInterval);
+    void this._safeCheckForUpdates();
 
     logger.info(
       `[Updater] 自动更新检查已启动，间隔: ${this.checkInterval / 1000 / 60} 分钟`
@@ -325,12 +347,7 @@ class AppUpdater {
    * 停止定时检查
    */
   stopAutoCheck() {
-    if (this._startupCheckTimer) {
-      clearTimeout(this._startupCheckTimer);
-      this._startupCheckTimer = null;
-    }
-
-    if (this._timer) {
+    if (this._timer !== null) {
       clearInterval(this._timer);
       this._timer = null;
     }

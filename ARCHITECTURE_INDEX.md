@@ -3,6 +3,12 @@
 > 最后更新于：2026-11-06
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
+2026-11-06 Windows 1.1.48准备：根版本和锁文件递增，新增 `release-notes/windows/1.1.48.md`，用于交付启动即检查与自动下载详情；此前1.1.47安装包保留。打包完成及产物验收记录随后追加。
+
+2026-11-06 安装包启动检查：`AppUpdater.startAutoCheck` 立即非阻塞检查并保留4小时周期；`update-command/getStatus` 恢复首检早于前端订阅的公开状态。`UpdateNotifier` 发现新版本直接打开下载详情，同版本关闭后不重复自动提示，迟到快照不覆盖实时状态。验证 autoUpdater / app-tools 与Full9项；此项尚未纳入先前已生成的1.1.47安装包。
+
+2026-11-06 Windows 1.1.47本地交付：根版本/锁文件由1.1.46递增，包含中等窗口监测布局、小床生命体征紧凑卡片、算法超市适配及重复回放修复，说明见 `release-notes/windows/1.1.47.md`。TEMP冻结1743个源文件，SDK链接指向冻结树；28项Python输入同哈希后复用并复验health。Full8项、实际产物8项、交付24项及NSIS2806文件摘要通过，449个包内源码与快照一致。交付目录 `C:/Users/23823/Downloads/Shroom-1.1.47`，新更新源保持不变；未上传或安装，非Mac产物。
+
 2026-11-06 小床面板与重复回放：`Aside` 的生命体征/告警卡按内容高度排布，避免继承220px图表高度；`PortalAlgorithmMarket.css` 按窗口高度收缩并保留内部滚动。`server.startPlaybackTimer` 在末尾重新播放时回到选区起点，开始/停止发送带系统、记录和序号的 `playbackStatus`；`Home` 过滤旧回执并同步 `Progress`，普通暂停保留位置和倍速。验证入口 bed-sidebar-status / algorithm-market-responsive / playback-restart-portal、playbackRestart / Home.playback，涉及回放执行Full。
 
 2026-11-06 Mac/中等窗口监测布局：`PortalMonitoring.css` 按CSS窗口宽度收缩左右面板，保留移动布局；`SmallBed` 的 `.portal-point-viewport` 标记安全显示区，`portalPointViewport` 用非持久化FOV/view offset避让左右栏。实际canvas始终全窗，镜头位置/目标/缩放和原采集链不变，图表隐藏、工具收起及纯点图同步释放空间。验证入口 `portalPointViewport.test` / `monitor-responsive-layout.mjs`、既有scene-only/point-buffer-entrance和Full；仅小床家族接入投影适配，其他渲染器未改。
