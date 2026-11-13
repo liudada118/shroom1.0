@@ -41,4 +41,33 @@ describe('每轮 Agent 回复与执行结果', () => {
     value.conversation.messages.pop();
     expect(buildAgentTurns(value, { second: { conversationId: 'other', text: '其他会话' } })[1].draft).toBeNull();
   });
+
+  it('历史与最终回复渲染 Markdown，用户输入保持原文', () => {
+    const value = snapshot();
+    value.conversation.messages[0].text = '**用户原文**';
+    value.conversation.messages[1].text = '## 历史标题\n\n**历史重点**';
+    value.conversation.messages[3].text = '| hand | 秒数 |\n| --- | --- |\n| left | 0.125 |';
+    const html = renderToStaticMarkup(<AgentConversation snapshot={value} />);
+    expect(html).toContain('**用户原文**');
+    expect(html).not.toContain('<strong>用户原文</strong>');
+    expect(html).toContain('<h2>历史标题</h2>');
+    expect(html).toContain('<strong>历史重点</strong>');
+    expect(html).toContain('<table>');
+  });
+
+  it('流式使用同一排版，完成时仅保留正式回答', () => {
+    const value = snapshot();
+    value.conversation.messages.pop();
+    value.activeTask = { id: 'second', status: 'running' };
+    const drafts = { second: { conversationId: 'conversation', text: '## 当前进展\n\n**正在生成**' } };
+    const streaming = renderToStaticMarkup(<AgentConversation snapshot={value} drafts={drafts} />);
+    expect(streaming).toContain('<h2>当前进展</h2>');
+    expect(streaming).toContain('<strong>正在生成</strong>');
+    expect(streaming).toContain('shroom-agent-caret');
+    value.conversation.messages.push({ id: 'final', taskId: 'second', role: 'assistant', text: '## 最终回答' });
+    const final = renderToStaticMarkup(<AgentConversation snapshot={value} drafts={drafts} />);
+    expect(final).toContain('<h2>最终回答</h2>');
+    expect(final).not.toContain('当前进展');
+    expect(final).not.toContain('shroom-agent-caret');
+  });
 });

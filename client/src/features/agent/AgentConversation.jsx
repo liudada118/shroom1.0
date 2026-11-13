@@ -5,6 +5,7 @@ import AgentTaskCard from './AgentTaskCard';
 import AgentAlgorithmDataRequest from './AgentAlgorithmDataRequest';
 import { buildAgentTurns, TASK_LABELS } from './agentState';
 import { attachmentThumbnail } from './agentAttachments';
+import AgentMarkdown from './AgentMarkdown';
 
 /** 每轮回复紧接本轮执行记录，历史记录折叠后仍留在所属轮次。 */
 export default function AgentConversation({ snapshot, drafts, disabled, pendingAction, onProposalAction, invoke, onSubmitAlgorithmData, onCancelAlgorithmData }) {
@@ -20,7 +21,8 @@ export default function AgentConversation({ snapshot, drafts, disabled, pendingA
     {turns.map((turn) => <section className="shroom-agent-turn" key={turn.id} data-task-id={turn.task?.id}>
       {turn.messages.map((message) => <article className={`shroom-agent-message is-${message.role}`} key={message.id}>
         <div className="shroom-agent-message-label">{message.role === 'user' ? tr('you') : 'Shroom Agent'}</div>
-        <div className="shroom-agent-message-text">{message.text}</div>
+        {message.role === 'assistant' ? <AgentMarkdown text={message.text} />
+          : <div className="shroom-agent-message-text">{message.text}</div>}
         {message.attachmentIds?.length > 0 && <ul className="shroom-agent-message-attachments" aria-label={tr('sentAttachments')}>{message.attachmentIds.map((id) => {
           const attachment = snapshot.attachments?.find((item) => item.id === id);
           return attachment && <li key={id}>{attachmentThumbnail(attachment) && <img loading="lazy" src={attachmentThumbnail(attachment)} alt={attachment.name} />}<span>{attachment.name}</span></li>;
@@ -28,7 +30,8 @@ export default function AgentConversation({ snapshot, drafts, disabled, pendingA
       </article>)}
       {turn.draft && <article className="shroom-agent-message is-assistant">
         <div className="shroom-agent-message-label">Shroom Agent <span>{tr('replying')}</span></div>
-        <div className="shroom-agent-message-text">{turn.draft.text}<span className="shroom-agent-caret" aria-hidden="true" /></div>
+        <AgentMarkdown text={turn.draft.text} />
+        <span className="shroom-agent-caret" aria-hidden="true" />
       </article>}
       {turn.task && <div className="shroom-agent-task-history">
         {turn.task.id === latestTaskId ? taskCard(turn.task)

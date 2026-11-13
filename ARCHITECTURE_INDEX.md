@@ -1,7 +1,9 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-11-06
+> 最后更新于：2026-11-11
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
+
+2026-11-11 Agent 回复排版：`AgentConversation` 的历史/最终/流式回复共用 `AgentMarkdown`，使用 `react-markdown` + `remark-gfm`；用户原文和存储协议不变。表格/代码块内部滚动，HTML 作为文本，链接限定 HTTP/HTTPS/mailto，回复图片不自动加载。验证入口 `AgentMarkdown.test.jsx` / `AgentConversation.test.jsx` / `scripts/tests/agent-markdown.mjs`；新增依赖执行 Full，见架构文末记录。
 
 2026-11-06 Windows 1.1.48交付：源码提交 `9cdd944`，新增本版说明，包含启动即检查与自动下载详情。E盘TEMP冻结1744文件后重新构建；Full9项、产物8项、交付24项、NSIS2806文件摘要及包内更新器/编译页专项通过，449个生产源码与快照一致。交付至 `C:/Users/23823/Downloads/Shroom-1.1.48`，1.1.47文件保留；未上传或安装，已有build改动未纳入源码提交。
 

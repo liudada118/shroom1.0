@@ -26,7 +26,9 @@
     "react-csv": "^2.2.2",
     "react-dom": "^19.0.0",
     "react-i18next": "^15.5.1",
+    "react-markdown": "10.1.0",
     "react-router-dom": "^7.1.0",
+    "remark-gfm": "4.0.1",
     "shroom": "file:..",
     "three": "^0.127.0",
     "zustand": "^5.0.0"
