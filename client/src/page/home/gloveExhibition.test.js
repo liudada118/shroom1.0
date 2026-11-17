@@ -75,6 +75,31 @@ describe('手套展示输入', () => {
     expect(frame.rawPressure).toHaveLength(256);
   });
 
+  it('右手的通道数据是 32×32 皮肤布局：热力取扣过零的 16×16 硬件矩阵，不截皮肤布局的前 256 个', () => {
+    // 后端给右手的通道帧是重排好的 1024 点皮肤布局，rawPressure 才是硬件顺序的 256 点（同样扣过零）。
+    const skinLayout = Array.from({ length: 1024 }, (_, index) => 1000 + index);
+    const hardware = Array.from({ length: 256 }, (_, index) => index);
+    const value = input({ channel: 'back', channelPressure: skinLayout, rawPressure: hardware });
+    value.message.handSide = 'right';
+    const frame = buildGloveExhibitionFrame(value);
+    expect(frame.side).toBe('right');
+    expect(frame.rawPressure).toEqual(hardware);
+    // 扣零后的通道帧随 processedData 一起到达时，它同样是 1024 点，仍然不能当硬件矩阵用。
+    value.message.processedData = skinLayout.map((item) => item - 1);
+    expect(buildGloveExhibitionFrame(value).rawPressure).toEqual(hardware);
+    expect(value.channelPressure).toHaveLength(1024);
+  });
+
+  it('左手照旧优先用扣零后的通道矩阵；没有正好 256 点的数据时退回原先的取法', () => {
+    const left = input({ channelPressure: Array(256).fill(5), rawPressure: Array(256).fill(80) });
+    expect(buildGloveExhibitionFrame(left).rawPressure).toEqual(Array(256).fill(5));
+    left.message.processedData = Array(256).fill(1);
+    expect(buildGloveExhibitionFrame(left).rawPressure).toEqual(Array(256).fill(1));
+    const longOnly = input({ channelPressure: Array.from({ length: 300 }, (_, index) => index), rawPressure: [] });
+    expect(buildGloveExhibitionFrame(longOnly).rawPressure).toEqual(Array.from({ length: 256 }, (_, index) => index));
+    expect(buildGloveExhibitionFrame(input({ channelPressure: [], rawPressure: [] })).rawPressure).toEqual([]);
+  });
+
   it('兼容旧字符串帧与10列线序，缺少有效点位保持无弯指', () => {
     const value = input({ message: { newArr: JSON.stringify(Array(147).fill(4)) } });
     expect(buildGloveExhibitionFrame(value).fingerPoints).toEqual(Array(5).fill(24));

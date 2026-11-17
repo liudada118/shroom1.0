@@ -76,7 +76,7 @@ export function registerBuiltinRenderers() {
       // 走 `sprite3d` 时没有；见下面 `optionalMethods` 那段说明。
       // 滚轮缩放与拖拽平移不算 —— 那是相机操作，不在 capabilities 的语汇里。
       capabilities: [RENDERER_CAPABILITIES.SIT, RENDERER_CAPABILITIES.ROTATE],
-      // 三个后端暴露面的**并集**：前四个人人都有，后十一个看 `backend` 参数。
+      // 三个后端暴露面的**并集**：前七个人人都有，后十一个看 `backend` 参数。
       methods: [
         'sitData',
         'sitValue',
@@ -84,6 +84,7 @@ export function registerBuiltinRenderers() {
         'changeWsDataRaw',
         'getSelectionTools',
         'changeSelectFlag',
+        'getViewTools',
         'changeWsData147',
         'changeWsData147R',
         'changeWsData256',
@@ -205,8 +206,8 @@ export function registerBuiltinRenderers() {
       label: '斑点热力（WebGL）',
       description: '每个数据点画成一个羽化圆点，alpha 累加后查 8 段色带上色',
       load: () => import('./webglHeatmap/react/WebglHeatmapRenderer.jsx'),
-      // 没有框选、没有视角 —— 它是一张平面图。`SIT` 是因为主数据入口
-      // 就是 `sitData({ wsPointData })`。
+      // 没有框选、没有镜头 —— 它是一张平面图，`getViewTools` 只提供展示方向（旋转 90°、水平 / 纵向翻转）。
+      // `SIT` 是因为主数据入口就是 `sitData({ wsPointData })`。
       capabilities: [RENDERER_CAPABILITIES.SIT],
       methods: [
         'sitData',
@@ -214,6 +215,7 @@ export function registerBuiltinRenderers() {
         'changeColor',
         'bthClickHandle',
         'getTuningControls',
+        'getViewTools',
       ],
       normalizeParams: normalizeWebglHeatmapParams,
       // `bed4096` 是唯一的迁移预设（逐字等于 `Canvas4096WebGL` 的现有行为，

@@ -150,11 +150,17 @@ function draw(context, data, canvas, options) {
 
 
     // 绘制不同透明度的圆形
+    let inheritsAlpha = false
     for (let i in dataOrderByAlpha) {
         if (isNaN(i)) continue;
+        // 负的透明度是非法值，赋值会被画布忽略，这一档沿用之前留下的透明度（可能来自上一次绘制）。
+        if (!(Number(i) >= 0)) inheritsAlpha = true
         let _data = dataOrderByAlpha[i]
         context.beginPath()
         context.globalAlpha = i
+        // 透明度为 0 的圆画了也不改变像素；一帧里绝大多数点都是 0，跳过能省掉上千次贴图。
+        // ⚠️ 判的是赋值后的实际透明度：非法值（负数）会沿用上一档，不能按键名判断。
+        if (context.globalAlpha === 0) continue
         _data.forEach(item => {
             // 把所有的圆都画再画布上
             context.drawImage(circle, item.x - circleHalfWidth, item.y - circleHalfHeight)
@@ -169,67 +175,90 @@ function draw(context, data, canvas, options) {
     colorize(colored.data, intensity.getImageData(), options)
 
 
-    context.clearRect(0, 0, context.canvas.width, context.canvas.height)
+    // 旧流程在这里把画布填成 #666 再清掉，只留下 fillStyle 这个状态；保留它，省掉两次整幅重绘。
     context.fillStyle = '#666'
-    context.fillRect(0, 0, context.canvas.width, context.canvas.height)
 
-
-    context.clearRect(0, 0, context.canvas.width, context.canvas.height)
-
-    // 将所有像素渲染
-    context.putImageData(colored, 0, 0)
-
-    applySharpen(context, canvas.width, canvas.height);
+    applySharpen(context, colored, canvas.width, canvas.height);
+    return !inheritsAlpha
 }
 
 
-function applySharpen(context, width, height) {
-    // 获取原始图像数据
-    const originalImageData = context.getImageData(0, 0, width, height);
-    const originalPixels = originalImageData.data;
+const sharpenOutputs = new WeakMap();
 
-    // 创建一个用于存放处理后的图像数据的 ImageData 对象
-    const outputImageData = context.createImageData(width, height);
-    const outputPixels = outputImageData.data;
-
-    const kernel = [
-        0, -1, 0,
-        -1, 5, -1,
-        0, -1, 0,
-    ];
-
-    const kernelSize = Math.sqrt(kernel.length);
-    const halfKernelSize = Math.floor(kernelSize / 2);
-
+/**
+ * 3×3 锐化核 `[0,-1,0, -1,5,-1, 0,-1,0]`，越界的邻点不计，透明度原样带过。
+ * 全是整数运算，结果与逐核循环的旧写法逐位相同（由 heatmap.test.js 对拍）。
+ *
+ * @param {Uint8ClampedArray} source RGBA 源像素，长度 `width * height * 4`，不被修改。
+ * @param {Uint8ClampedArray} target RGBA 出参，同样长度，每个分量都会被写到。
+ * @param {number} width 像素列数。
+ * @param {number} height 像素行数。
+ * @returns {void}
+ */
+export function sharpenPixels(source, target, width, height) {
+    const stride = width * 4;
+    const lastColumn = width - 1;
     for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            let r = 0; let g = 0; let b = 0;
-
-            for (let ky = 0; ky < kernelSize; ky++) {
-                for (let kx = 0; kx < kernelSize; kx++) {
-                    // 考虑边缘像素
-                    const pixelY = y + ky - halfKernelSize;
-                    const pixelX = x + kx - halfKernelSize;
-
-                    if (pixelY < 0 || pixelY >= height || pixelX < 0 || pixelX >= width) continue;
-
-                    // 卷积计算
-                    const offset = (pixelY * width + pixelX) * 4;
-                    const weight = kernel[ky * kernelSize + kx];
-
-                    r += originalPixels[offset] * weight;
-                    g += originalPixels[offset + 1] * weight;
-                    b += originalPixels[offset + 2] * weight;
-                }
+        const hasUp = y > 0;
+        const hasDown = y < height - 1;
+        let offset = y * stride;
+        for (let x = 0; x < width; x++, offset += 4) {
+            let r = 5 * source[offset];
+            let g = 5 * source[offset + 1];
+            let b = 5 * source[offset + 2];
+            if (hasUp) {
+                r -= source[offset - stride]; g -= source[offset - stride + 1]; b -= source[offset - stride + 2];
             }
-
-            const destOffset = (y * width + x) * 4;
-            outputPixels[destOffset] = r;
-            outputPixels[destOffset + 1] = g;
-            outputPixels[destOffset + 2] = b;
-            outputPixels[destOffset + 3] = originalPixels[destOffset + 3]; // 保持相同的 alpha 值
+            if (x > 0) {
+                r -= source[offset - 4]; g -= source[offset - 3]; b -= source[offset - 2];
+            }
+            if (x < lastColumn) {
+                r -= source[offset + 4]; g -= source[offset + 5]; b -= source[offset + 6];
+            }
+            if (hasDown) {
+                r -= source[offset + stride]; g -= source[offset + stride + 1]; b -= source[offset + stride + 2];
+            }
+            target[offset] = r;
+            target[offset + 1] = g;
+            target[offset + 2] = b;
+            target[offset + 3] = source[offset + 3];
         }
     }
+}
+
+/**
+ * 把上色后的像素锐化并写回画布。
+ * ⚠️ 旧流程是先写回画布再读出来锐化；画布按预乘透明度存，全透明像素读回来 RGB 是 0。
+ * 这里直接在内存里做同一件事；遇到半透明像素（上色不会产生）就退回旧流程，不猜取整。
+ *
+ * @param {CanvasRenderingContext2D} context 目标画布的上下文。
+ * @param {ImageData} colored 上色后的整幅像素，会被就地规整。
+ * @param {number} width 画布宽。
+ * @param {number} height 画布高。
+ * @returns {void}
+ */
+function applySharpen(context, colored, width, height) {
+    let originalPixels = colored.data;
+    let roundTrip = colored.width !== width || colored.height !== height;
+    for (let i = 3, len = originalPixels.length; i < len && !roundTrip; i += 4) {
+        const alpha = originalPixels[i];
+        if (alpha === 0) {
+            originalPixels[i - 3] = 0; originalPixels[i - 2] = 0; originalPixels[i - 1] = 0;
+        } else if (alpha !== 255) roundTrip = true;
+    }
+    if (roundTrip) {
+        context.clearRect(0, 0, context.canvas.width, context.canvas.height)
+        context.putImageData(colored, 0, 0)
+        originalPixels = context.getImageData(0, 0, width, height).data;
+    }
+
+    // 整幅输出每次都被写满，可以一直复用同一块内存，不必每帧申请几兆。
+    let outputImageData = sharpenOutputs.get(context.canvas);
+    if (!outputImageData || outputImageData.width !== width || outputImageData.height !== height) {
+        outputImageData = context.createImageData(width, height);
+        sharpenOutputs.set(context.canvas, outputImageData);
+    }
+    sharpenPixels(originalPixels, outputImageData.data, width, height);
 
     // 将处理后的图像数据绘制回画布
     context.putImageData(outputImageData, 0, 0);
@@ -280,6 +309,11 @@ function colorize(pixels, gradient, options) {
 }
 
 
+/**
+ * 清空画布并按数据重画一遍热力图。
+ *
+ * @returns {boolean} 画面是否只由本次入参决定；false 表示用到了画布上遗留的透明度，同样的入参再画一次可能不同。
+ */
 export function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, options) {
 
     const data = generateData(arr, canvas, width, height, interp1, interp2, order, options)
@@ -291,8 +325,9 @@ export function bthClickHandle(arr, canvas, width, height, interp1, interp2, ord
     isShadow = true
     context.globalCompositeOperation = 'lighter';
     // context2.drawImage(img, 0, 0, canvas2.width, canvas2.height);
-    draw(context, data, canvas, options)
+    const repeatable = draw(context, data, canvas, options)
     isShadow = false
+    return repeatable
 
     // draw(context2, data)
 }
@@ -473,6 +508,13 @@ const changeOptions = (value) => {
 
 
 
+/** 把绘制参数序列化成可比较的文本；NaN、无穷和 undefined 在 JSON 里会被抹平，这里单独标出。 */
+function describeOptions(options) {
+    return JSON.stringify(options, (key, value) => (
+        (typeof value === 'number' && !Number.isFinite(value)) || value === undefined ? `<${String(value)}>` : value
+    ))
+}
+
 let i = 0
 export class HeatmapCanvas {
     constructor(width, height, canvasWProp, canvasHProp, canvasName, options) {
@@ -514,8 +556,25 @@ export class HeatmapCanvas {
 
     }
 
+    /**
+     * 按当前数据重画热力图。输入、参数和画布尺寸都与上次相同时不重画，画布保持原样。
+     * ⚠️ 只有本方法往 `this.canvas` 上画；外部若直接改这张画布，要先调 `invalidate()`。
+     *
+     * @returns {boolean} 本次是否真的重画了；false 时调用方可以跳过后续拷贝和纹理上传。
+     */
     changeHeatmap(resArr, interp1, interp2, order) {
-        bthClickHandle(resArr, this.canvas, this.width, this.height, interp1, interp2, order, this.options)
+        const signature = `${interp1}|${interp2}|${order}|${this.width}x${this.height}|${this.canvas.width}x${this.canvas.height}|${describeOptions(this.options)}`
+        const length = resArr ? resArr.length : -1
+        let unchanged = this.drawnSignature === signature && this.drawnValues && this.drawnValues.length === length
+        for (let index = 0; unchanged && index < length; index++) {
+            if (this.drawnValues[index] !== resArr[index]) unchanged = false
+        }
+        if (unchanged) return false
+        this.drawnSignature = null
+        const repeatable = bthClickHandle(resArr, this.canvas, this.width, this.height, interp1, interp2, order, this.options)
+        this.drawnValues = length >= 0 ? Array.from(resArr) : null
+        // ⚠️ 画面依赖遗留透明度时不登记：同样的数据下次必须照旧重画，才能与跳过前的行为一致。
+        this.drawnSignature = repeatable ? signature : null
         const ctx = this.canvas.getContext('2d');
         // canvas.width = 1024;
         // canvas.height = 1024;
@@ -523,6 +582,12 @@ export class HeatmapCanvas {
         // 填充 Canvas 颜色
         // ctx.fillStyle = 'rgb(255, 0, 0)'; // 纯红色
         // ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        return true
+    }
+
+    /** 让下一次 changeHeatmap 无条件重画。 */
+    invalidate() {
+        this.drawnSignature = null
     }
 }
 

@@ -8,7 +8,7 @@ import { trackUsage, trackUsageOperation } from '../../services/usageAnalytics';
 const TOOL_FEATURES = {
   'rotate-x': 'view_tools', 'rotate-y': 'view_tools', 'rotate-back': 'view_tools', top: 'view_tools',
   'zoom-in': 'view_tools', 'zoom-out': 'view_tools', 'view-reset': 'view_tools',
-  select: 'region_selection', ruler: 'sensor_ruler', 'flip-x': 'view_tools', 'flip-y': 'view_tools',
+  select: 'region_selection', ruler: 'sensor_ruler', 'rotate-90': 'view_tools', 'flip-x': 'view_tools', 'flip-y': 'view_tools',
   zero: 'calibration_zero', restore: 'calibration_zero', system: 'workspace_tools', builder: 'workspace', jqbed: 'algorithm_binding',
 };
 

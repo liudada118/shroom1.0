@@ -66,6 +66,14 @@ import {
   normalizeRawFrame,
   padGlove147Rows,
 } from '../../core/layouts.js';
+import {
+  isUprightMatrixView,
+  matrixViewAxisLabels,
+  matrixViewCell,
+  matrixViewSize,
+  normalizeMatrixView,
+  transformMatrixView,
+} from '../../../shared/matrixViewTransform.js';
 import { buildRobotFrame, getRobotLayout } from '../../core/robotLayouts.js';
 import {
   QUAD_POSITIONS,
@@ -133,6 +141,8 @@ export function createWebglMatrixBackend({
   const isRobot = Boolean(robotParts);
   const isFoot = opts.foot.enabled;
   const isGlove = opts.glove.enabled;
+  // 分区、双脚和手套版面由多块拼成，整幅旋转、翻转没有定义；只有单块规则矩阵支持改展示方向。
+  const rotatable = !isRobot && !isFoot && !isGlove;
 
   // 片元着色器按两个编译期开关拼一次，之后所有上下文共用同一段源码。
   const fragmentSrc = buildFragmentShader({
@@ -217,8 +227,14 @@ export function createWebglMatrixBackend({
 
   const baseTexW = grid.gridWidth;
   const baseTexH = grid.gridHeight;
+  // ⚠️ texSize 与待画帧里的 tw / th 始终是数据自己的行列；画布、纹理和格子边长才按摆好方向之后的行列算。
   let texSize = { w: baseTexW, h: baseTexH };
   let texSize2 = { w: baseTexW, h: baseTexH };
+  // 展示方向（翻转、旋转）；不支持的版面没有修改入口，一直与数据同向。
+  let displayView = normalizeMatrixView();
+
+  /** 数据行列 → 画面行列；转奇数圈时互换。 */
+  const shownSize = (tw, th) => matrixViewSize(tw, th, displayView);
 
   // 数字、热场和行列索引一起变换；选区和量尺继续读取真实画布的屏幕矩形。
   let zoom = 1, panX = 0, panY = 0, drag = null, interactionActive = false;
@@ -316,7 +332,8 @@ export function createWebglMatrixBackend({
       return calcRobotCellSize(info.layoutW, info.layoutH, maxW, maxH);
     }
     if (opts.fixedCellSize > 0) return opts.fixedCellSize;
-    return calcCellSize(texW, texH, maxW, maxH, opts.cellPadding);
+    const shown = shownSize(texW, texH);
+    return calcCellSize(shown.width, shown.height, maxW, maxH, opts.cellPadding);
   }
 
   /**
@@ -448,8 +465,11 @@ export function createWebglMatrixBackend({
   function rebuildPrimary(tw, th, withMask = false) {
     texSize = { w: tw, h: th };
     destroyContext(ctxA);
-    ctxA = initContext(paneA.gl, tw, th, cellSize, withMask);
-    overlayA = sizeOverlay(paneA.overlay, tw, th, cellSize);
+    const shown = shownSize(tw, th);
+    ctxA = initContext(paneA.gl, shown.width, shown.height, cellSize, withMask);
+    // 调参重画要拿数据自己的行列去排帧，画布转过之后 texWidth / texHeight 已经不是它了。
+    if (ctxA) { ctxA.sourceWidth = tw; ctxA.sourceHeight = th; }
+    overlayA = sizeOverlay(paneA.overlay, shown.width, shown.height, cellSize);
   }
 
   /**
@@ -571,8 +591,9 @@ export function createWebglMatrixBackend({
    * @param {number} tw 矩阵宽（格）。
    * @param {number} th 矩阵高（格）。
    * @param {number} cs 格子边长（px）。
+   * @param {{rows: number[], cols: number[]}} [labels] 画面翻过、转过之后每行每列的原始行列号；不传按 1 起点顺排。
    */
-  function paintOverlay(ctx2d, data, tw, th, cs) {
+  function paintOverlay(ctx2d, data, tw, th, cs, labels) {
     if (!ctx2d) return;
     const cw = tw * cs;
     const ch = th * cs;
@@ -614,11 +635,14 @@ export function createWebglMatrixBackend({
       }
     }
 
-    paintIndices(ctx2d, 0, 0, tw, th, cs);
+    paintIndices(ctx2d, 0, 0, tw, th, cs, labels);
   }
 
-  /** 在矩阵外侧绘制 1 基行列号，不增加采样格或参与统计。 */
-  function paintIndices(ctx2d, x, y, tw, th, cs) {
+  /**
+   * 在矩阵外侧绘制 1 基行列号，不增加采样格或参与统计。
+   * ⚠️ 翻转、旋转后标的仍是数据原来的行列号（由 labels 给出），用户才能对回设备上的位置。
+   */
+  function paintIndices(ctx2d, x, y, tw, th, cs, labels) {
     const cw = tw * cs, ch = th * cs;
     const rowH = Math.max(cs * 0.7, 18);
     const colW = Math.max(cs, 24);
@@ -630,7 +654,7 @@ export function createWebglMatrixBackend({
       ctx2d.fillRect(x - colW, y, colW, ch);
       ctx2d.fillStyle = opts.textColor;
       for (let i = 0; i < th; i++) {
-        ctx2d.fillText(String(i + 1), x - colW / 2, y + (i + 0.5) * cs);
+        ctx2d.fillText(String(labels ? labels.rows[i] : i + 1), x - colW / 2, y + (i + 0.5) * cs);
       }
     }
     if (opts.indexRow) {
@@ -639,7 +663,7 @@ export function createWebglMatrixBackend({
       ctx2d.fillRect(x, y + rowY, cw, rowH);
       ctx2d.fillStyle = opts.textColor;
       for (let j = 0; j < tw; j++) {
-        ctx2d.fillText(String(j + 1), x + (j + 0.5) * cs, y + rowY + rowH / 2);
+        ctx2d.fillText(String(labels ? labels.cols[j] : j + 1), x + (j + 0.5) * cs, y + rowY + rowH / 2);
       }
     }
   }
@@ -714,8 +738,15 @@ export function createWebglMatrixBackend({
         const { data, tw, th } = pendingA;
         lastPrimaryFrame = pendingA;
         pendingA = null;
-        renderFrame(ctxA, data, tw, th);
-        paintOverlay(overlayA, data, tw, th, cs);
+        if (rotatable && !isUprightMatrixView(displayView)) {
+          // 只在上屏这一步用摆好方向的副本；pendingA / lastPrimaryFrame 里留的仍是原始顺序。
+          const shown = transformMatrixView(data, tw, th, displayView);
+          renderFrame(ctxA, shown.data, shown.width, shown.height);
+          paintOverlay(overlayA, shown.data, shown.width, shown.height, cs, matrixViewAxisLabels(tw, th, displayView));
+        } else {
+          renderFrame(ctxA, data, tw, th);
+          paintOverlay(overlayA, data, tw, th, cs);
+        }
       }
 
       if (pendingB !== null && ctxB) {
@@ -1033,17 +1064,25 @@ export function createWebglMatrixBackend({
       canvas: paneA.gl, columns: baseTexW, rows: baseTexH,
       /** 框选和量尺期间暂停查看手势，退出后恢复。 */
       onInteractionChange(active) { interactionActive = Boolean(active); endDrag(); },
-      /** 返回实际矩阵外沿，排除叠加层留白。 */
+      /**
+       * 返回实际矩阵外沿，排除叠加层留白。
+       * ⚠️ 翻过或转过之后返回 null：按外沿均分行列的换算只在画面与数据同向时成立，之后交给逐点投影，否则会选错格子。
+       */
       getGridBounds() {
+        if (!isUprightMatrixView(displayView)) return null;
         const rect = paneA.gl.getBoundingClientRect();
         return { x1: rect.left, y1: rect.top, x2: rect.right, y2: rect.bottom };
       },
-      /** 按实际数字画布尺寸投影原始格中心，统计使用相同转置后的行优先帧。 */
+      /** 按实际数字画布尺寸投影原始格中心，统计使用相同转置后的行优先帧；翻转、旋转后格子跟着画面走，索引不变。 */
       projectSensors() {
         const rect = paneA.gl.getBoundingClientRect();
-        return Array.from({ length: baseTexW * baseTexH }, (_, index) => ({ index, visible: true,
-          x: rect.left + (index % baseTexW + 0.5) * rect.width / baseTexW,
-          y: rect.top + (Math.floor(index / baseTexW) + 0.5) * rect.height / baseTexH }));
+        const shown = shownSize(baseTexW, baseTexH);
+        return Array.from({ length: baseTexW * baseTexH }, (_, index) => {
+          const cell = matrixViewCell(Math.floor(index / baseTexW), index % baseTexW, baseTexW, baseTexH, displayView);
+          return { index, visible: true,
+            x: rect.left + (cell.col + 0.5) * rect.width / shown.width,
+            y: rect.top + (cell.row + 0.5) * rect.height / shown.height };
+        });
       },
     },
     /**
@@ -1085,6 +1124,27 @@ export function createWebglMatrixBackend({
       queuePrimary(rawData, baseTexW, baseTexH);
     },
 
+    ...(rotatable ? {
+      /**
+       * 展示方向：整幅矩阵先按数据方向镜像，再顺时针转若干个 90°；数字保持正立，行列号标原始行列。
+       * ⚠️ 只换上屏用的副本；统计、框选索引和 lastData 仍是原始顺序，采集与导出不经过这里。
+       * @param {{flipX?: boolean, flipY?: boolean, quarterTurns?: number}} view 展示方向，缺的字段当作没翻、没转
+       */
+      setViewTransform(view) {
+        const next = normalizeMatrixView(view);
+        if (disposed || (next.flipX === displayView.flipX && next.flipY === displayView.flipY && next.quarterTurns === displayView.quarterTurns)) return;
+        const reshaped = next.quarterTurns % 2 !== displayView.quarterTurns % 2 && texSize.w !== texSize.h;
+        displayView = next;
+        // 非方阵转 90° 后宽高互换，格子边长和画布都要按新版面重算；翻转不改版面。
+        if (reshaped) {
+          cellSize = computeCellSize(...sizingSize(false));
+          rebuildPrimary(texSize.w, texSize.h, false);
+        }
+        pendingA = pendingA || lastPrimaryFrame;
+        if (pendingA !== null) schedule();
+      },
+    } : {}),
+
     /**
      * 契约要求的重着色钩子，本后端是**空实现**。
      *
@@ -1099,8 +1159,8 @@ export function createWebglMatrixBackend({
      * 吸收阈值变化。逐字对应 `Num2Doriginal.jsx:839-851`。
      *
      * 三重门槛缺一不可：变的是 `valuej` 或 `valuef`（真值判断，0 不算）、
-     * 当前没有在途帧、有过裸数据帧。尺寸取的是**上下文自己记的**纹理尺寸，
-     * 不是 `texSize` —— 两者在换尺寸失败时会不一致。
+     * 当前没有在途帧、有过裸数据帧。尺寸取的是**上下文自己记的**数据行列
+     * （`sourceWidth` / `sourceHeight`），不是 `texSize` —— 两者在换尺寸失败时会不一致。
      *
      * @param {object} [changed] `sitValue` 收到的那个对象。
      */
@@ -1114,7 +1174,7 @@ export function createWebglMatrixBackend({
         return;
       }
       if (pendingA !== null || !ctxA || !lastData) return;
-      queuePrimary(lastData, ctxA.texWidth, ctxA.texHeight);
+      queuePrimary(lastData, ctxA.sourceWidth, ctxA.sourceHeight);
     },
 
     /** 启动。没有常驻帧循环 —— 有数据才画，所以这里只是开闸。 */

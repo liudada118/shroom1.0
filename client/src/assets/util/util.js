@@ -5,7 +5,7 @@
  */
 import { rainbowTextColors, rainbowTextColorsxy } from "./color";
 import { jetRgb } from "./jetLadder.js";
-import { findMax, jet } from "@shroom/frontend/core/frameMath.js";
+import { findMax, jet, gaussBlur_1 } from "@shroom/frontend/core/frameMath.js";
 // `garyColors` 不在这里 import 了 —— 它唯一的消费者 `jetgGrey` 已经连表
 // 带函数搬进 `@shroom/frontend/core/greyLadder.js`（见本文件下方那条 re-export）。
 import { rainbowBackColors, rainbowColors } from "./value";
@@ -341,32 +341,18 @@ export function addSide1(arr, width, height, wnum, hnum, sideNum) {
 export { gaussBlur_1 } from "@shroom/frontend/core/frameMath.js";
 
 /**
- * 高斯return
- * @param {*} scl 
- * @param {*} tcl 
- * @param {*} w 
- * @param {*} h 
- * @param {*} r 
+ * 高斯模糊的「返回新数组」版本：结果长度与 `scl` 相同，`w * h` 之外的位置保持 1。
+ * 原先是 `gaussBlur_1` 的一份复制，现在直接转调它，输出逐位不变；足底、整椅等渲染器每帧都调。
+ *
+ * @param {number[]} scl 源矩阵，行优先展开，不被修改。
+ * @param {number} w 列数。
+ * @param {number} h 行数。
+ * @param {number} r 高斯半径。
+ * @returns {number[]} 新数组。
  */
 export function gaussBlur_return(scl, w, h, r) {
   const res = new Array(scl.length).fill(1)
-  var rs = Math.ceil(r * 2.57); // significant radius
-  for (var i = 0; i < h; i++) {
-    for (var j = 0; j < w; j++) {
-      var val = 0,
-        wsum = 0;
-      for (var iy = i - rs; iy < i + rs + 1; iy++)
-        for (var ix = j - rs; ix < j + rs + 1; ix++) {
-          var x = Math.min(w - 1, Math.max(0, ix));
-          var y = Math.min(h - 1, Math.max(0, iy));
-          var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-          var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
-          val += scl[y * w + x] * wght;
-          wsum += wght;
-        }
-      res[i * w + j] = Math.round(val / wsum);
-    }
-  }
+  gaussBlur_1(scl, res, w, h, r)
   return res
 }
 

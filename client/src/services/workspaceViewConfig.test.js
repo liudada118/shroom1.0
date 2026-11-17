@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventDispatcher, Group, PerspectiveCamera, Vector3 } from 'three';
 import { createWorkspaceViewTools } from '../renderers/workspaceViewTools';
+import { createMatrixViewTools } from '@shroom/frontend/renderers/shared/matrixViewTransform.js';
 import { bindWorkspaceViewPersistence, readWorkspaceViewConfig, writeWorkspaceViewConfig, workspaceViewStorageKey } from './workspaceViewConfig';
 
 const disposals = [];
@@ -77,6 +78,48 @@ describe('视角与镜像按系统/模式持久化', () => {
     original.binding.dispose();
     original.view.flip('x'); await vi.advanceTimersByTimeAsync(500);
     expect(readWorkspaceViewConfig({ systemId: 'smallBedNoAlg' }).flipX).toBe(true);
+  });
+
+  it('原始数据的展示方向（旋转、翻转）按系统和模式保存，重新进入恢复；与 3D 镜头快照互不套用', async () => {
+    /** 建一个只有展示方向的数字矩阵工具并接上持久化。 */
+    const matrix = (options) => {
+      const applied = [], view = createMatrixViewTools((next) => applied.push(next));
+      const binding = bindWorkspaceViewPersistence({ rendererRef: { current: { getViewTools: () => view } }, ...options });
+      disposals.push(() => { binding.dispose(); view.dispose(); });
+      return { view, binding, applied };
+    };
+    const raw = { systemId: 'hand', mode: 'numoriginal' };
+    const first = matrix(raw);
+    first.view.rotateQuarter(); first.view.rotateQuarter(); first.view.rotateQuarter();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(readWorkspaceViewConfig(raw)).toEqual({ schemaVersion: 1, kind: 'matrix', flipX: false, flipY: false, quarterTurns: 3 });
+    // 转过之后水平翻转：翻的是当前看到的左右，圈数从 3 记成 1。
+    first.view.flip('x');
+    await vi.advanceTimersByTimeAsync(300);
+    const turnedAndFlipped = { flipX: true, flipY: false, quarterTurns: 1 };
+    expect(readWorkspaceViewConfig(raw)).toEqual({ schemaVersion: 1, kind: 'matrix', ...turnedAndFlipped });
+    first.binding.dispose(); first.view.dispose();
+    const reopened = matrix(raw);
+    expect(reopened.view.getState()).toMatchObject({ ...turnedAndFlipped, selectionSafe: false }); expect(reopened.applied).toEqual([turnedAndFlipped]);
+    // 同一系统的 3D 模式、别的系统都不受影响。
+    expect(matrix({ systemId: 'hand', mode: 'normal' }).view.getState().quarterTurns).toBe(0);
+    expect(matrix({ systemId: 'smallBed', mode: 'numoriginal' }).view.getState().quarterTurns).toBe(0);
+    // 同一个存储键下换了渲染器类型：两种快照都整体拒绝对方的内容。
+    const sceneOnMatrixKey = scene(raw);
+    expect(sceneOnMatrixKey.view.getState()).toMatchObject({ flipX: false, quarterTurns: 0 }); expect(sceneOnMatrixKey.object.rotation.x).toBe(0);
+    const mixed = { systemId: 'mixed', mode: 'normal' }, three = scene(mixed);
+    three.view.rotate('x'); three.view.flip('x'); await vi.advanceTimersByTimeAsync(300);
+    three.binding.dispose(); three.view.dispose();
+    const matrixOnSceneKey = matrix(mixed);
+    expect(matrixOnSceneKey.view.getState().quarterTurns).toBe(0); expect(matrixOnSceneKey.applied).toEqual([]);
+    // 恢复之后再次进入保持与数据同向。
+    reopened.view.reset(); await vi.advanceTimersByTimeAsync(300);
+    reopened.binding.dispose(); reopened.view.dispose();
+    expect(matrix(raw).view.getState()).toMatchObject({ flipX: false, flipY: false, quarterTurns: 0, selectionSafe: true });
+    // 只存了圈数的早期快照（没有翻转字段）照常恢复，按没翻处理。
+    const legacy = { systemId: 'legacy', mode: 'numoriginal' };
+    localStorage.setItem(workspaceViewStorageKey(legacy), JSON.stringify({ schemaVersion: 1, kind: 'matrix', quarterTurns: 2 }));
+    expect(matrix(legacy).view.getState()).toMatchObject({ flipX: false, flipY: false, quarterTurns: 2 });
   });
 
   it('坏缓存或存储拒绝只影响记忆，不改变可用视角和原系统默认值', async () => {

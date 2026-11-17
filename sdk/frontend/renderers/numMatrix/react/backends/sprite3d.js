@@ -47,6 +47,7 @@ import * as THREE from 'three';
 import { jet, press } from '../../../../core/frameMath.js';
 import { isClassicColormap, sampleColormapRgb } from '../../../../core/colormaps.js';
 import { TEXTURE_CELL_SIZE } from '../../core/params.js';
+import { isUprightMatrixView, matrixViewCell, matrixViewSize, normalizeMatrixView } from '../../../shared/matrixViewTransform.js';
 import {
   cellUvOffset,
   clampTextureValue,
@@ -291,24 +292,40 @@ export function createSpriteMatrixBackend({
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   const dummy = new THREE.Object3D();
 
-  // 实例矩阵只算一次（见文件头第 3 条）。有坐标表时用物理坐标，
-  // 否则退回规则矩阵布局。
-  for (let i = 0; i < count; i += 1) {
-    const coordinatePoint = coordinatePoints?.[i];
-    if (coordinatePoint) {
-      dummy.position.set(coordinatePoint.worldX, coordinatePoint.worldY, 0);
-    } else {
-      const { x, y } = instanceWorldPosition(i, grid.gridWidth, grid.gridHeight, worldCellSize);
-      dummy.position.set(x, y, 0);
-    }
-    dummy.updateMatrix();
-    mesh.setMatrixAt(i, dummy.matrix);
+  let displayView = normalizeMatrixView();
 
+  /**
+   * 按当前展示方向（翻转、旋转）摆放每个数字格。实例矩阵只在建场景和改方向时算（见文件头第 3 条）。
+   * ⚠️ 挪的是格子的位置，第 i 格显示的仍是第 i 个数据；数字贴图不转不翻，所以字一直是正的。
+   */
+  function placeInstances() {
+    const shown = matrixViewSize(grid.gridWidth, grid.gridHeight, displayView);
+    for (let i = 0; i < count; i += 1) {
+      const coordinatePoint = coordinatePoints?.[i];
+      if (coordinatePoint) {
+        // 坐标表以外接矩形中心为原点、y 朝屏幕下方：先镜像，再转；顺时针 90° 是 (x, y) → (-y, x)。
+        let x = displayView.flipX ? -coordinatePoint.worldX : coordinatePoint.worldX;
+        let y = displayView.flipY ? -coordinatePoint.worldY : coordinatePoint.worldY;
+        for (let turn = 0; turn < displayView.quarterTurns; turn += 1) [x, y] = [-y, x];
+        dummy.position.set(x, y, 0);
+      } else {
+        const cell = matrixViewCell(Math.floor(i / grid.gridWidth), i % grid.gridWidth, grid.gridWidth, grid.gridHeight, displayView);
+        const { x, y } = instanceWorldPosition(cell.row * shown.width + cell.col, shown.width, shown.height, worldCellSize);
+        dummy.position.set(x, y, 0);
+      }
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // 有坐标表时用物理坐标，否则退回规则矩阵布局。
+  placeInstances();
+  for (let i = 0; i < count; i += 1) {
     const [u, v] = cellUvOffset(PLACEHOLDER_VALUE, textureRange);
     uvOffsets[i * 2] = u;
     uvOffsets[i * 2 + 1] = v;
   }
-  mesh.instanceMatrix.needsUpdate = true;
   mesh.rotation.x = Math.PI;
 
   // 属性建一次，逐帧只置 needsUpdate（见文件头第 2 条）。
@@ -448,8 +465,12 @@ export function createSpriteMatrixBackend({
     // 坐标表可能是不规则布点，不能把其数据下标冒充等间距矩阵。
     sensorGrid: coordinatePoints ? null : {
       canvas, columns: grid.gridWidth, rows: grid.gridHeight,
-      /** 投影矩阵外沿，框选按完整格边界吸附，不能用格中心再加固定像素。 */
+      /**
+       * 投影矩阵外沿，框选按完整格边界吸附，不能用格中心再加固定像素。
+       * ⚠️ 翻过或转过之后返回 null：按外沿均分行列的换算只在画面与数据同向时成立，之后交给逐点投影，否则会选错格子。
+       */
       getGridBounds() {
+        if (!isUprightMatrixView(displayView)) return null;
         const rect = canvas.getBoundingClientRect();
         mesh.updateWorldMatrix(true, false); camera.updateWorldMatrix(true, false);
         const first = new THREE.Vector3(-grid.gridWidth * worldCellSize / 2, -grid.gridHeight * worldCellSize / 2, 0).applyMatrix4(mesh.matrixWorld).project(camera);
@@ -490,6 +511,17 @@ export function createSpriteMatrixBackend({
         reportStats?.(nextFrame);
       },
     } : {}),
+
+    /**
+     * 展示方向：整幅矩阵先按数据方向镜像，再顺时针转若干个 90°。只重摆数字格，帧数据、统计和量尺读到的索引不变。
+     * @param {{flipX?: boolean, flipY?: boolean, quarterTurns?: number}} view 展示方向，缺的字段当作没翻、没转
+     */
+    setViewTransform(view) {
+      const next = normalizeMatrixView(view);
+      if (disposed || (next.flipX === displayView.flipX && next.flipY === displayView.flipY && next.quarterTurns === displayView.quarterTurns)) return;
+      displayView = next;
+      placeInstances();
+    },
 
     /**
      * 阈值变化后重烘精灵图。

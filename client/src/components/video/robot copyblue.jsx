@@ -156,6 +156,8 @@ const Canvas = React.forwardRef((props, refs) => {
   const bodyCanvas = useRef()
   const handHeatmap1Ref = useRef()
   const handHeatmapRef = useRef()
+  // 监测页在 init 之前回放的调节值；init 结束后按先后套用。
+  const earlyColorCallsRef = useRef([])
 
   function init() {
     container = document.getElementById(`canvas${props.index}`);
@@ -429,9 +431,7 @@ const Canvas = React.forwardRef((props, refs) => {
     };
     // initSet();
 
-
-
-
+    for (const config of earlyColorCallsRef.current) changeColor(config);
   }
 
   function addCanvas(model, canvas) {
@@ -476,13 +476,20 @@ const Canvas = React.forwardRef((props, refs) => {
 
   const width = 32, height = 32;
 
+  let renewedCanvas = null, renewedTexture = null;
+
+  /** 用当前压力重画身体贴图；热力图没变且贴图目标没换时什么都不做。 */
   function canvasRenew(CanvasTexture, canvas) {
 
     // const canvas = CanvasTexture.canvas
     // console.log(CanvasTexture)
     if (canvas) {
 
-      handHeatmapRef.current.changeHeatmap(ndata1, 1, 1, 0)
+      const redrawn = handHeatmapRef.current.changeHeatmap(ndata1, 1, 1, 0)
+      // ⚠️ 一次重画加两次整幅拷贝再上传 1024² 纹理要上百毫秒；无新数据时不能照做，否则静止也只有个位数帧率。
+      if (!redrawn && canvas === renewedCanvas && CanvasTexture === renewedTexture) return
+      renewedCanvas = canvas
+      renewedTexture = CanvasTexture
 
       // handHeatmap1Ref.current = new HeatmapCanvas(30, 30, 1, 1, 'body', {
       //   min: 0,
@@ -757,7 +764,13 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
 
+  /**
+   * 调节热力图的颜色上限、热点大小、过滤，以及灯光亮度。
+   * ⚠️ 监测页在本组件挂载的同一刻就会回放保存过的调节值，这时 init 还没跑、热力图还不存在；
+   *   直接写会抛错，整个监测页跟着白屏。所以先记下来，init 结束后再套用。
+   */
   function changeColor({ max, size, filter, light, speedValue }) {
+    if (!handHeatmapRef.current) { earlyColorCallsRef.current.push({ max, size, filter, light, speedValue }); return }
     console.log(handHeatmapRef.current)
     console.log(max, size)
     if (max) handHeatmapRef.current.options.max = max

@@ -74,7 +74,10 @@ export function buildGloveExhibitionFrame({ message, channel, channelPressure, r
   const pressure = mapped.length ? mapped : current;
   const processed = numbers(message.processedData);
   // ⚠️ 地形必须消费当前压力，优先 processed；使用未扣零基准会导致点了清零仍有山峰。
-  const matrix = [processed, current, numbers(rawPressure)].find((values) => values.length >= 256) || [];
+  // ⚠️ 只有正好 256 点的才是 16×16 硬件矩阵。右手的通道数据是后端重排好的 32×32 皮肤布局（1024 点），
+  //   截它的前 256 个当硬件矩阵，热力地图上右手的手指和手掌会整体错位；右手要落到 rawPressure（后端已按同一零点扣零）。
+  const candidates = [processed, current, numbers(rawPressure)];
+  const matrix = candidates.find((values) => values.length === 256) || candidates.find((values) => values.length >= 256) || [];
   const fingerPoints = getGloveFingerPoints(message, pressure);
   const fingers = getCalibratedGloveFingers(fingerPoints, calibration);
   const orientation = Array.isArray(message.rotate) ? message.rotate.map(Number) : [];

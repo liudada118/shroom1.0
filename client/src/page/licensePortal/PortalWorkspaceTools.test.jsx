@@ -4,14 +4,21 @@ import { screenRulerDistance } from './PortalScreenRuler';
 
 describe('工具箱能力与屏幕量尺', () => {
   it('未接入或已卸载的渲染器不冒充支持视角工具', () => {
-    expect(readWorkspaceToolSupport(null)).toEqual({ view: null, flipX: false, flipY: false, select: false });
+    expect(readWorkspaceToolSupport(null)).toEqual({ view: null, flipX: false, flipY: false, quarterTurns: 0, select: false });
     const disposed = { getState: () => ({ available: false }) };
     expect(readWorkspaceToolSupport({ getViewTools: () => disposed }).view).toBe(null);
   });
   it('镜像状态与框选能力分开读取', () => {
     const view = { getState: () => ({ available: true, flipX: true }) };
     expect(readWorkspaceToolSupport({ getViewTools: () => view, changeSelectFlag() {} }))
-      .toEqual({ view, flipX: true, flipY: false, select: true });
+      .toEqual({ view, flipX: true, flipY: false, quarterTurns: 0, select: true });
+  });
+  it('展示旋转的圈数随状态读取，已卸载的工具不带出旧圈数', () => {
+    const view = { getState: () => ({ available: true, quarterTurns: 3, selectionSafe: false }), rotateQuarter() {} };
+    expect(readWorkspaceToolSupport({ getViewTools: () => view, changeSelectFlag() {} }))
+      .toEqual({ view, flipX: false, flipY: false, quarterTurns: 3, select: false });
+    const disposed = { getState: () => ({ available: false, quarterTurns: 2 }) };
+    expect(readWorkspaceToolSupport({ getViewTools: () => disposed }).quarterTurns).toBe(0);
   });
   it('屏幕距离仅使用 CSS 像素，不乘 DPR 或冒充 mm', () => {
     expect(screenRulerDistance({ x: 10, y: 20 }, { x: 13, y: 24 })).toBe(5);

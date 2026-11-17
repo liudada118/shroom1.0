@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EventDispatcher, Group, PerspectiveCamera, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, EventDispatcher, Group, PerspectiveCamera, Points, Vector3 } from 'three';
 import { createWorkspaceViewTools } from './workspaceViewTools';
 import { validateWorkspaceViewSnapshot } from '@shroom/frontend/renderers/shared/three/workspaceViewTools.js';
 
@@ -12,7 +12,112 @@ function fixture() {
   return { object, camera, controls, tools: createWorkspaceViewTools({ object, camera, controls }) };
 }
 
+/** 倾斜、偏置且几何中心不在原点的点图，贴近旧场景「group 里放一张 particles」的结构。 */
+function planeFixture() {
+  const group = new Group(), camera = new PerspectiveCamera(40, 1, 1, 10000);
+  group.position.set(5, 150, 230); group.rotation.x = -Math.PI / 6; camera.position.set(0, 400, 600);
+  // 3 列 × 2 行，x 方向带旧场景那种逐列偏移，所以几何中心不在原点。
+  const positions = new Float32Array([-150, 0, -100, -30, 0, -100, 90, 0, -100, -150, 0, 0, -30, 0, 0, 90, 0, 0]);
+  const geometry = new BufferGeometry(); geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  const particles = new Points(geometry); particles.scale.setScalar(0.5); particles.rotation.x = Math.PI / 3;
+  group.add(particles);
+  const controls = Object.assign(new EventDispatcher(), { target: new Vector3(), update: vi.fn(), reset: vi.fn() });
+  const tools = createWorkspaceViewTools({ object: group, camera, controls, plane: particles });
+  /** 第 index 个顶点的世界坐标。 */
+  const world = (index) => {
+    particles.updateWorldMatrix(true, false);
+    return new Vector3().fromBufferAttribute(geometry.getAttribute('position'), index).applyMatrix4(particles.matrixWorld);
+  };
+  /** 点图中心，以及平面内朝「列增大」「行增大」的两个方向。 */
+  const frame = () => ({ center: world(0).add(world(5)).multiplyScalar(0.5),
+    right: world(2).sub(world(0)).normalize(), down: world(3).sub(world(0)).normalize() });
+  return { group, particles, positions, camera, controls, tools, world, frame };
+}
+
 describe('原生展示视角工具', () => {
+  it('没有点图平面的场景不提供旋转 90°，状态里的圈数恒为 0', () => {
+    const { tools } = fixture();
+    expect(tools.rotateQuarter).toBeUndefined();
+    expect(tools.getState().quarterTurns).toBe(0); expect(tools.getSnapshot().quarterTurns).toBe(0);
+  });
+  it('旋转 90° 是整幅画面绕点图法线顺时针转：中心不动、顶点数据不动、四次回到原位', () => {
+    const { tools, positions, frame, group } = planeFixture();
+    group.updateWorldMatrix(true, true);
+    const source = Array.from(positions), start = frame(), initial = group.matrixWorld.clone();
+    const normal = start.down.clone().cross(start.right).normalize();
+    expect(tools.rotateQuarter()).toBe(true);
+    const turned = frame();
+    expect(turned.center.distanceTo(start.center)).toBeLessThan(1e-9);
+    // 原来朝右的一行现在朝下，原来朝下的一列现在朝左：从法线一侧看是顺时针。
+    expect(turned.right.dot(start.down)).toBeCloseTo(1, 9); expect(turned.down.dot(start.right)).toBeCloseTo(-1, 9);
+    expect(turned.down.clone().cross(turned.right).normalize().dot(normal)).toBeCloseTo(1, 9);
+    expect(Array.from(positions)).toEqual(source);
+    expect(tools.getState()).toMatchObject({ quarterTurns: 1, selectionSafe: false });
+    tools.rotateQuarter(); tools.rotateQuarter(); expect(tools.getState().quarterTurns).toBe(3);
+    tools.rotateQuarter();
+    expect(tools.getState()).toMatchObject({ quarterTurns: 0, selectionSafe: true });
+    group.updateWorldMatrix(true, true);
+    group.matrixWorld.elements.forEach((value, index) => expect(value).toBeCloseTo(initial.elements[index], 9));
+    expect(tools.rotateQuarter(-1)).toBe(true); expect(tools.getState().quarterTurns).toBe(3);
+    expect(tools.rotateQuarter(0)).toBe(false); expect(tools.rotateQuarter(NaN)).toBe(false);
+  });
+  it('转过 90° 后水平翻转仍是当前画面的左右翻，再点一次回到翻转前', () => {
+    const { tools, frame, group } = planeFixture();
+    tools.rotateQuarter();
+    group.updateWorldMatrix(true, true);
+    const before = frame(), pose = group.matrixWorld.clone();
+    tools.flip('x');
+    const after = frame();
+    // 此时屏幕左右对应数据的「行增大」方向：它反了，另一条方向不变，点图平面本身不变。
+    expect(after.down.dot(before.down)).toBeCloseTo(-1, 9); expect(after.right.dot(before.right)).toBeCloseTo(1, 9);
+    // 镜像之后再转 3 圈与「转 1 圈之后左右翻」是同一幅画面，所以圈数记成 3。
+    expect(tools.getState()).toMatchObject({ flipX: true, flipY: false, quarterTurns: 3 });
+    expect(tools.getSnapshot()).toMatchObject({ flipX: true, flipY: false, quarterTurns: 3 });
+    tools.flip('x');
+    expect(tools.getState()).toMatchObject({ flipX: false, flipY: false, quarterTurns: 1 });
+    group.updateWorldMatrix(true, true);
+    group.matrixWorld.elements.forEach((value, index) => expect(value).toBeCloseTo(pose.elements[index], 9));
+    // 转 180° 与镜像可交换，圈数不变。
+    tools.rotateQuarter(); tools.flip('y');
+    expect(tools.getState()).toMatchObject({ flipX: false, flipY: true, quarterTurns: 2 });
+  });
+  it('转过之后点俯视，画面仍保持旋转后的方向', () => {
+    const { particles, camera, controls, world } = planeFixture();
+    const tools = createWorkspaceViewTools({ object: particles, camera, controls, localPlane: true });
+    /** 「列增大」方向在屏幕上的指向：x 为右、y 为上。 */
+    const screenRight = () => {
+      camera.updateMatrixWorld(true);
+      const direction = world(2).sub(world(0)).normalize().transformDirection(camera.matrixWorldInverse);
+      // 加 0 把舍入出来的 -0 归成 0，方向只看落在哪条屏幕轴上。
+      return [Math.round(direction.x) + 0, Math.round(direction.y) + 0];
+    };
+    tools.top(); expect(screenRight()).toEqual([1, 0]);
+    tools.rotateQuarter(); tools.top();
+    // 顺时针转一圈后，原来朝右的一行朝下。
+    expect(screenRight()).toEqual([0, -1]);
+    tools.rotateQuarter(); tools.top(); expect(screenRight()).toEqual([-1, 0]);
+    tools.reset(); tools.top(); expect(screenRight()).toEqual([1, 0]);
+  });
+  it('旋转 90° 随快照保存与恢复，恢复视角和卸载都回到没转的状态', () => {
+    const first = planeFixture();
+    first.tools.rotateQuarter(); first.tools.flip('y');
+    const saved = first.tools.getSnapshot();
+    expect(validateWorkspaceViewSnapshot(saved)).toBe(true); expect(saved).toMatchObject({ flipY: true, quarterTurns: 3 });
+    const second = planeFixture();
+    expect(second.tools.restoreSnapshot(JSON.parse(JSON.stringify(saved)))).toBe(true);
+    expect(second.tools.getState()).toEqual(first.tools.getState());
+    second.group.updateWorldMatrix(true, true); first.group.updateWorldMatrix(true, true);
+    second.group.matrixWorld.elements.forEach((value, index) => expect(value).toBeCloseTo(first.group.matrixWorld.elements[index], 9));
+    second.tools.reset();
+    expect(second.tools.getState()).toEqual({ available: true, flipX: false, flipY: false, quarterTurns: 0, selectionSafe: true });
+    first.tools.dispose();
+    expect(first.group.position.toArray()).toEqual([5, 150, 230]); expect(first.tools.rotateQuarter()).toBe(false);
+    // 旧版本存下的快照没有圈数，按没转恢复；圈数非法的整体拒绝。
+    const legacy = planeFixture(), old = legacy.tools.getSnapshot(); delete old.quarterTurns;
+    legacy.tools.rotateQuarter();
+    expect(legacy.tools.restoreSnapshot(old)).toBe(true); expect(legacy.tools.getState().quarterTurns).toBe(0);
+    for (const bad of [4, -1, 1.5, '1']) expect(legacy.tools.restoreSnapshot({ ...old, quarterTurns: bad })).toBe(false);
+  });
   it('倾斜点阵俯视沿真实垫面法线，缩放仍围绕当前矩阵中心', () => {
     const { object, camera, controls } = fixture();
     object.rotation.x = Math.PI / 3;
@@ -38,7 +143,7 @@ describe('原生展示视角工具', () => {
     const { object, tools, controls } = fixture();
     tools.flip('x'); tools.flip('y');
     expect(object.scale.toArray()).toEqual([-2, 3, -4]);
-    expect(tools.getState()).toEqual({ available: true, flipX: true, flipY: true, selectionSafe: false });
+    expect(tools.getState()).toEqual({ available: true, flipX: true, flipY: true, quarterTurns: 0, selectionSafe: false });
     tools.flip('x'); expect(object.scale.x).toBe(2);
     tools.rotate('x'); tools.reset();
     expect(object.scale.toArray()).toEqual([2, 3, 4]);

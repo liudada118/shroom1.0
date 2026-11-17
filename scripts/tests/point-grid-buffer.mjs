@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { assertQuarterTurn, assertSamePicture, capturePointPicture, captureSettledPointPicture, installPointPictureProbe } from './point-picture-probe.mjs';
 
 const { createServer } = createRequire(new URL('../../client/package.json', import.meta.url))('vite');
 const artifacts = await mkdtemp(join(tmpdir(), 'shroom-point-grid-buffer-'));
@@ -88,6 +89,7 @@ try {
       }
     }
   });
+  await page.addInitScript(installPointPictureProbe);
   await page.route('http://127.0.0.1:19245/**', route => route.fulfill({ json: {}, headers: { 'Access-Control-Allow-Origin': '*' } }));
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__point-grid-buffer?density=1`);
   await page.locator('[data-renderer-id="pointGrid"] canvas').waitFor();
@@ -119,9 +121,28 @@ try {
   assert.ok(buffered.finite && buffered.height > 0);
   const gpu = await page.evaluate(() => window.__sdkBufferGpu);
   assert.ok(gpu[buffered.mainPoints]?.finite && gpu[buffered.ringPoints]?.finite);
+
+  // 展示旋转 90°：SDK 点图自己就是被转的平面，边缘缓冲点是它的子对象，必须跟着整幅画面一起转。
+  // 用显卡实际收到的矩阵和顶点缓冲核对，转的是画面，顶点（数据）一个字节不变。
+  /** 调用清单画布转发出来的真实视角工具。 */
+  const view = (method, ...args) => page.evaluate(([name, values]) => window.__manifestBuffer().getViewTools()[name](...values), [method, args]);
+  const upright = await captureSettledPointPicture(page, 'SDK 点图');
+  assert.deepEqual(upright.map(record => record.count).sort((a, b) => a - b), [buffered.ringPoints, buffered.mainPoints], '主点图和边缘缓冲点都在画面里');
+  assert.equal(await view('rotateQuarter', 1), true);
+  const turned = await capturePointPicture(page);
+  const plane = assertQuarterTurn('SDK 点图顺时针一次', upright, turned, 1);
+  assert.deepEqual(await view('getState'), { available: true, flipX: false, flipY: false, quarterTurns: 1, selectionSafe: false });
+  assert.equal((await snapshot()).raw, buffered.raw, '展示旋转不改渲染器手里的原始帧');
+  assert.equal(await view('rotateQuarter', 1), true);
+  assertQuarterTurn('SDK 点图顺时针两次', upright, await capturePointPicture(page), 2);
+  assert.equal(await view('rotateQuarter', -1), true); assert.equal(await view('rotateQuarter', -1), true);
+  assertSamePicture('SDK 点图逆时针转回', upright, await capturePointPicture(page));
+  assert.equal(await view('rotateQuarter', 1), true); assert.equal(await view('reset'), true);
+  assertSamePicture('SDK 点图恢复视角', upright, await capturePointPicture(page, 30));
+  assert.deepEqual(await view('getState'), { available: true, flipX: false, flipY: false, quarterTurns: 0, selectionSafe: true });
   assert.deepEqual(errors, []);
   await page.screenshot({ path: join(artifacts, 'sdk-buffer.png') });
-  console.log('POINT_GRID_BUFFER_PASS', JSON.stringify({ artifacts, initial, disabled, buffered, gpu }));
+  console.log('POINT_GRID_BUFFER_PASS', JSON.stringify({ artifacts, initial, disabled, buffered, gpu, quarterTurn: { layers: upright.length, centerError: Number(plane.error.toFixed(5)) } }));
 } catch (error) {
   await page?.screenshot({ path: join(artifacts, 'failure.png') }).catch(() => {});
   console.error('POINT_GRID_BUFFER_FAILED', JSON.stringify({ artifacts, errors, state: await snapshot().catch(() => null) })); throw error;

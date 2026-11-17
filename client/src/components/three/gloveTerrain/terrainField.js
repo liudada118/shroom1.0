@@ -25,14 +25,19 @@ export function pressureValue(value) {
   return Number.isFinite(number) ? Math.max(0, number) : 0;
 }
 
-/** 按左右手硬件点号生成手指/手掌的目标场坐标。 */
+/**
+ * 按左右手硬件点号生成手指/手掌的目标场坐标。
+ * ⚠️ 右手只把整块分区镜像到另一侧。点表里每一行已经是右手在屏幕上从左到右的顺序（与 2D 数字一致），
+ *   块内不能再反一次，否则每根手指和手掌内部左右颠倒：按靠拇指的一侧，亮的是靠小指的一侧。
+ */
 function rawSamples(side) {
   const points = GLOVE_HAND_POINTS[side];
   const result = [];
   Object.entries(REGIONS).forEach(([part, region]) => {
     const rows = part === 'palm' ? points.palm : points[part].rows;
     rows.forEach((row, y) => row.forEach((point, x) => {
-      const col = region[2] + x / Math.max(1, row.length - 1) * (region[3] - region[2]);
+      const across = x / Math.max(1, row.length - 1);
+      const col = region[2] + (side === 'right' ? 1 - across : across) * (region[3] - region[2]);
       result.push({ index: point - 1, row: region[0] + y / Math.max(1, rows.length - 1) * (region[1] - region[0]),
         col: side === 'right' ? 31 - col : col, spread: part === 'palm' ? 1.5 : 1.2, gain: part === 'palm' ? .6 : .8 });
     }));

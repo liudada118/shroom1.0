@@ -1,15 +1,19 @@
 import i18n from '../../i18n';
 import React, { useEffect, useRef, useState } from 'react';
-import { RotateLeftOutlined, RotateRightOutlined, ZoomInOutlined, ZoomOutOutlined, AimOutlined, ReloadOutlined, SelectOutlined, ColumnWidthOutlined, SwapOutlined, VerticalAlignMiddleOutlined } from '@ant-design/icons';
+import { RotateLeftOutlined, RotateRightOutlined, ZoomInOutlined, ZoomOutOutlined, AimOutlined, ReloadOutlined, SelectOutlined, ColumnWidthOutlined, SwapOutlined, VerticalAlignMiddleOutlined, RedoOutlined } from '@ant-design/icons';
 import PortalUtilityPanel from './PortalUtilityPanel';
 import PortalScreenRuler from './PortalScreenRuler';
 import PortalSelectionTools from './PortalSelectionTools';
 
-/** 读取当前已挂载的画布能力；未接入的渲染器不能冒充支持旋转或框选。 */
+/**
+ * 读取当前已挂载的画布能力；未接入的渲染器不能冒充支持旋转或框选。
+ * ⚠️ view 不保证每个动作都有：数字矩阵的工具只有旋转 90°、翻转和恢复，没有镜头类动作，按钮要逐个看方法在不在。
+ */
 export function readWorkspaceToolSupport(renderer) {
   const view = renderer?.getViewTools?.();
   const state = view?.getState?.();
   return { view: state?.available ? view : null, flipX: Boolean(state?.flipX), flipY: Boolean(state?.flipY),
+    quarterTurns: state?.available ? state.quarterTurns || 0 : 0,
     select: typeof renderer?.changeSelectFlag === 'function' && state?.selectionSafe !== false
       && (typeof renderer?.getSelectionTools !== 'function' || Boolean(renderer.getSelectionTools())) };
 }
@@ -46,11 +50,15 @@ export default function PortalWorkspaceTools({ open, onClose, rendererRef, selec
     setSupport(readWorkspaceToolSupport(rendererRef?.current));
   };
   const unavailable = i18n.t('monitorUi.viewUnavailable');
-  const canSelect = support.select && !support.flipX && !support.flipY;
+  /** 当前画布的工具是否真的提供这个动作。 */
+  const can = (method) => typeof support.view?.[method] === 'function';
+  // 没有镜头的平面视图（数字矩阵、热力图）翻的是画面的左右和上下，说明里不提模型轴。
+  const flat = !can('rotate');
+  const canSelect = support.select && !support.flipX && !support.flipY && !support.quarterTurns;
   /** 仅在当前原生渲染器确实支持框选时启用，量尺和框选互斥。 */
   const select = () => {
     const current = readWorkspaceToolSupport(rendererRef?.current);
-    if (!current.select || current.flipX || current.flipY) return;
+    if (!current.select || current.flipX || current.flipY || current.quarterTurns) return;
     setRuler(false); onSelectionChange?.(!selectionActive);
   };
   const viewItems = [
@@ -60,19 +68,23 @@ export default function PortalWorkspaceTools({ open, onClose, rendererRef, selec
     { id: 'zoom-in', label: i18n.t('monitorUi.zoomIn'), icon: <ZoomInOutlined />, description: i18n.t('monitorUi.zoomInHint'), method: 'zoom', args: [1] },
     { id: 'zoom-out', label: i18n.t('monitorUi.zoomOut'), icon: <ZoomOutOutlined />, description: i18n.t('monitorUi.zoomOutHint'), method: 'zoom', args: [-1] },
     { id: 'view-reset', label: i18n.t('monitorUi.resetView'), icon: <ReloadOutlined />, description: i18n.t('monitorUi.resetViewHint'), method: 'reset' },
-  ].map((item) => ({ ...item, category: 'view', disabled: !support.view,
-    description: support.view ? item.description : unavailable, onClick: () => act(item.method, ...(item.args || [])) }));
-  return <div className="portal-workspace-tools" data-native-view={Boolean(support.view)}><PortalUtilityPanel open={open} onClose={onClose} displayContent={displayContent} items={[
+  ].map((item) => ({ ...item, category: 'view', disabled: !can(item.method),
+    description: can(item.method) ? item.description : unavailable, onClick: () => act(item.method, ...(item.args || [])) }));
+  // 原生视角标记只认带镜头的 3D 工具，数字矩阵不因此隐藏旧的画布按钮。
+  return <div className="portal-workspace-tools" data-native-view={can('rotate')}><PortalUtilityPanel open={open} onClose={onClose} displayContent={displayContent} items={[
     ...viewItems,
     { id: 'select', category: 'analysis', label: i18n.t('monitorUi.regionAnalysis'), icon: <SelectOutlined />, active: Boolean(selectionActive), disabled: !canSelect,
       description: canSelect ? i18n.t('monitorUi.regionAnalysisHint') : typeof rendererRef?.current?.changeSelectFlag === 'function' ? i18n.t('monitorUi.resetBeforeSelecting') : i18n.t('monitorUi.regionStatsUnavailable'), onClick: select },
     { id: 'ruler', category: 'analysis', label: i18n.t('monitorUi.sensorRuler'), icon: <ColumnWidthOutlined />, active: ruler, disabled: !selectionApi?.getSensorPoints,
       description: selectionApi?.getSensorPoints ? i18n.t('monitorUi.sensorRulerHint') : i18n.t('monitorUi.sensorRulerUnavailable'),
       onClick: () => { if (selectionActive) onSelectionChange?.(false); setRuler(!ruler); } },
-    { id: 'flip-x', category: 'processing', label: i18n.t('monitorUi.flipHorizontal'), icon: <SwapOutlined />, active: support.flipX, disabled: !support.view,
-      description: support.view ? i18n.t('monitorUi.flipHorizontalHint') : unavailable, onClick: () => act('flip', 'x') },
-    { id: 'flip-y', category: 'processing', label: i18n.t('monitorUi.flipVertical'), icon: <VerticalAlignMiddleOutlined />, active: support.flipY, disabled: !support.view,
-      description: support.view ? i18n.t('monitorUi.flipVerticalHint') : unavailable, onClick: () => act('flip', 'y') },
+    { id: 'rotate-90', category: 'processing', label: i18n.t('monitorUi.rotateQuarter'), icon: <RedoOutlined />, active: support.quarterTurns > 0, disabled: !can('rotateQuarter'),
+      description: can('rotateQuarter') ? i18n.t('monitorUi.rotateQuarterHint') : i18n.t('monitorUi.rotateQuarterUnavailable'),
+      onClick: () => act('rotateQuarter', 1) },
+    { id: 'flip-x', category: 'processing', label: i18n.t('monitorUi.flipHorizontal'), icon: <SwapOutlined />, active: support.flipX, disabled: !can('flip'),
+      description: can('flip') ? i18n.t(flat ? 'monitorUi.flipHorizontalFlatHint' : 'monitorUi.flipHorizontalHint') : unavailable, onClick: () => act('flip', 'x') },
+    { id: 'flip-y', category: 'processing', label: i18n.t('monitorUi.flipVertical'), icon: <VerticalAlignMiddleOutlined />, active: support.flipY, disabled: !can('flip'),
+      description: can('flip') ? i18n.t(flat ? 'monitorUi.flipVerticalFlatHint' : 'monitorUi.flipVerticalHint') : unavailable, onClick: () => act('flip', 'y') },
     ...items,
   ]} /><PortalScreenRuler active={ruler} api={selectionApi} systemKey={systemKey} onClose={() => setRuler(false)} />
     {selectionActive && selectionApi && <PortalSelectionTools api={selectionApi} onClose={() => onSelectionChange?.(false)} />}</div>;

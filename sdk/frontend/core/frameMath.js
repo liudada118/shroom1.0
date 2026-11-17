@@ -36,6 +36,11 @@
  * 它是调试残留（同一份原实现里还有一句 `console.log('分压')`，搬 `sprite3d.js`
  * 时已经摘掉了）。这里也摘掉：60Hz 刷控制台会拖慢开发者工具，而一个要发出去的
  * 包更不该往消费者的控制台里写东西。返回值一个字节都没变。
+ *
+ * ## 唯一的实现改动
+ *
+ * `gaussBlur_1` 改成查权重表、跳过全零区域并按输入内容缓存最近几次结果，原函数体留作 `gaussBlurReference`。
+ * 输出逐位不变，由 `frameMath.test.js` 拿原实现逐元素对拍。
  */
 
 import { jetRgb } from './jetLadder.js';
@@ -230,29 +235,14 @@ export function addSide(arr, width, height, wnum, hnum, sideNum = 0) {
   ];
 }
 
-/**
- * 朴素高斯模糊。**这个函数不是纯的 —— 结果写进 `tcl`，没有返回值。**
- *
- * 逐字搬自 `util.js:371-387`。本文件里其余函数都返回新数组，只有它是原地写出参，
- * 所以单独点一句：调用方要自己准备好 `tcl`（长度 `w * h`）。这是原签名，改成
- * 返回新数组会让 7 个调用点全部要改，不在这一轮的范围里。
- *
- * 复杂度是 O(w · h · rs²)，`rs = ceil(r * 2.57)`。点阵传的 `r` 是 4-8，
- * 矩阵放大后接近 100×100，所以单帧几十万次乘加 —— 它是点阵管线里最贵的一步，
- * 也是 `fps: 10` 这个预设值的由来。**要提速得换成可分离卷积（横竖各一遍，
- * 降到 O(w · h · rs)），那是独立的一件事，会改变浮点舍入。**
- *
- * 盒式的那一族（`gaussBlur_2` / `boxBlur_2` / `boxesForGauss`）在下面 —— 它是
- * 可分离实现，`canvas2d` 后端用它；点阵仍然走本函数，没有切过去。
- *
- * @param {number[]} scl 源矩阵，行优先展开，不被修改。
- * @param {number[]} tcl **出参**，长度须为 `w * h`，结果写在这里。
- * @param {number} w 列数。
- * @param {number} h 行数。
- * @param {number} r 高斯半径。
- * @returns {void}
- */
-export function gaussBlur_1(scl, tcl, w, h, r) {
+// 滑块拖动会产生很多半径；每张表只有 (2rs+1)² 个 double，但不能无限攒。
+const GAUSS_KERNEL_CACHE_LIMIT = 16;
+// rs 再大权重表就按平方膨胀，退回逐点计算。
+const GAUSS_TABLE_MAX_RADIUS = 64;
+const gaussKernels = new Map();
+
+/** 朴素高斯原实现，逐字搬自 `util.js:371-387`；退化参数和同一数组读写仍走它。 */
+function gaussBlurReference(scl, tcl, w, h, r) {
   var rs = Math.ceil(r * 2.57); // significant radius
   for (var i = 0; i < h; i++)
     for (var j = 0; j < w; j++) {
@@ -269,6 +259,156 @@ export function gaussBlur_1(scl, tcl, w, h, r) {
         }
       tcl[i * w + j] = Math.round(val / wsum);
     }
+}
+
+/**
+ * 取某半径的权重表与权重和，按半径缓存。
+ * ⚠️ 权重表达式和累加顺序必须与 `gaussBlurReference` 逐字一致，否则取整结果会变。
+ *
+ * @param {number} r 高斯半径，须为正有限数。
+ * @returns {{rs: number, size: number, weights: Float64Array, wsum: number}|null}
+ *   权重和不是正有限数时返回 null，表示这个半径只能走原实现。
+ */
+function getGaussKernel(r) {
+  let kernel = gaussKernels.get(r);
+  if (kernel !== undefined) return kernel;
+  const rs = Math.ceil(r * 2.57);
+  const size = 2 * rs + 1;
+  const weights = new Float64Array(size * size);
+  let wsum = 0;
+  for (let dy = -rs, k = 0; dy <= rs; dy++)
+    for (let dx = -rs; dx <= rs; dx++, k++) {
+      const dsq = dx * dx + dy * dy;
+      const wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
+      weights[k] = wght;
+      wsum += wght;
+    }
+  kernel = wsum > 0 && Number.isFinite(wsum) ? { rs, size, weights, wsum } : null;
+  if (gaussKernels.size >= GAUSS_KERNEL_CACHE_LIMIT) gaussKernels.delete(gaussKernels.keys().next().value);
+  gaussKernels.set(r, kernel);
+  return kernel;
+}
+
+/** 判断能否走权重表：半径和尺寸正常，且读写的不是同一块内存。 */
+function canUseGaussTable(scl, tcl, w, h, r) {
+  return typeof r === 'number' && r > 0 && Number.isFinite(r)
+    && Math.ceil(r * 2.57) <= GAUSS_TABLE_MAX_RADIUS
+    && Number.isInteger(w) && Number.isInteger(h) && w > 0 && h > 0
+    && scl !== tcl
+    && !(ArrayBuffer.isView(scl) && ArrayBuffer.isView(tcl) && scl.buffer === tcl.buffer);
+}
+
+// 同一矩阵、同一半径的结果按内容缓存：点阵每个动画帧都重算一遍，而数据帧率通常低于刷新率。
+const GAUSS_MEMO_LIMIT = 8;
+// 缓存最多 8 份、每份两块 Float64Array；上限 256×256 时合计不超过约 8 MB，现有点阵最大 136×136。
+const GAUSS_MEMO_MAX_POINTS = 65536;
+const gaussMemo = [];
+let gaussMemoClock = 0;
+let gaussScratch = new Float64Array(0);
+
+/**
+ * 按权重表求和并取整，写进 `tcl`；`keep` 非空时同时留一份供缓存。
+ * ⚠️ 抽头顺序固定为先行后列、从小到大，与原实现一致；改顺序会改变取整结果。
+ *
+ * @param {Float64Array} src 已转成数值的源矩阵，长度 `w * h`。
+ * @param {number[]} tcl 出参。
+ * @param {Float64Array|null} keep 可选的结果副本。
+ * @param {number} w 列数。
+ * @param {number} h 行数。
+ * @param {{rs: number, size: number, weights: Float64Array, wsum: number}} kernel 权重表。
+ * @returns {void}
+ */
+function blurWithGaussTable(src, tcl, keep, w, h, kernel) {
+  const { rs, size, weights, wsum } = kernel;
+  // 非零样本的外接矩形：它之外的抽头只会往和里加 0，跳过不改变结果。
+  let minX = w, maxX = -1, minY = h, maxY = -1;
+  for (let y = 0, index = 0; y < h; y++)
+    for (let x = 0; x < w; x++, index++)
+      if (src[index] !== 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        maxY = y;
+      }
+  // ⚠️ 越界抽头会被折到边缘行列：矩形贴着哪条边，那一侧就不能裁。
+  const xLo = minX === 0 ? -rs : minX, xHi = maxX === w - 1 ? w - 1 + rs : maxX;
+  const yLo = minY === 0 ? -rs : minY, yHi = maxY === h - 1 ? h - 1 + rs : maxY;
+  for (let i = 0, index = 0; i < h; i++) {
+    const y0 = Math.max(i - rs, yLo), y1 = Math.min(i + rs, yHi);
+    for (let j = 0; j < w; j++, index++) {
+      const x0 = Math.max(j - rs, xLo), x1 = Math.min(j + rs, xHi);
+      let val = 0;
+      for (let iy = y0; iy <= y1; iy++) {
+        const row = (iy < 0 ? 0 : iy >= h ? h - 1 : iy) * w;
+        let k = (iy - i + rs) * size + (x0 - j + rs);
+        if (x0 >= 0 && x1 < w) {
+          for (let position = row + x0, last = row + x1; position <= last; position++, k++) val += src[position] * weights[k];
+        } else {
+          for (let ix = x0; ix <= x1; ix++, k++) val += src[row + (ix < 0 ? 0 : ix >= w ? w - 1 : ix)] * weights[k];
+        }
+      }
+      const value = Math.round(val / wsum);
+      tcl[index] = value;
+      if (keep) keep[index] = value;
+    }
+  }
+}
+
+/**
+ * 高斯模糊。**这个函数不是纯的 —— 结果写进 `tcl`，没有返回值。**
+ *
+ * 调用方要自己准备好 `tcl`（长度 `w * h`）。输出与 `gaussBlurReference` 逐位相同：
+ * 权重查表、全零区域不算，输入与最近几次调用完全相同时直接取回上次结果。
+ * ⚠️ 不要换成可分离卷积 —— 求和顺序一变，取整结果就和旧版对不上。
+ * ⚠️ 缓存比的是内容副本，不是数组引用；调用方原地改写 `scl` 后再调仍会得到新结果。
+ *
+ * 盒式的那一族（`gaussBlur_2` / `boxBlur_2` / `boxesForGauss`）在下面，`canvas2d` 后端用它。
+ *
+ * @param {number[]} scl 源矩阵，行优先展开，不被修改。
+ * @param {number[]} tcl **出参**，长度须为 `w * h`，结果写在这里。
+ * @param {number} w 列数。
+ * @param {number} h 行数。
+ * @param {number} r 高斯半径。
+ * @returns {void}
+ */
+export function gaussBlur_1(scl, tcl, w, h, r) {
+  const kernel = canUseGaussTable(scl, tcl, w, h, r) ? getGaussKernel(r) : null;
+  if (!kernel) {
+    gaussBlurReference(scl, tcl, w, h, r);
+    return;
+  }
+  const total = w * h;
+  // 先整份转成数值：与原实现在乘法里做的隐式转换结果相同，之后读的是连续内存。
+  let source = gaussScratch.length === total ? gaussScratch : new Float64Array(total);
+  for (let index = 0; index < total; index++) source[index] = scl[index];
+  if (total > GAUSS_MEMO_MAX_POINTS) {
+    gaussScratch = source;
+    blurWithGaussTable(source, tcl, null, w, h, kernel);
+    return;
+  }
+  for (const entry of gaussMemo) {
+    if (entry.w !== w || entry.h !== h || entry.r !== r) continue;
+    const saved = entry.source;
+    let index = 0;
+    while (index < total && saved[index] === source[index]) index++;
+    if (index < total) continue;
+    entry.stamp = ++gaussMemoClock;
+    const result = entry.result;
+    for (index = 0; index < total; index++) tcl[index] = result[index];
+    gaussScratch = source;
+    return;
+  }
+  let slot = gaussMemo.length < GAUSS_MEMO_LIMIT ? null : gaussMemo[0];
+  if (slot) { for (const entry of gaussMemo) if (entry.stamp < slot.stamp) slot = entry; }
+  else { slot = { w: -1, h: -1, r: NaN, source: null, result: null, stamp: 0 }; gaussMemo.push(slot); }
+  const recycled = slot.source;
+  // ⚠️ 写出参可能中途抛错（例如出参被冻结）；先作废这一格，算完才登记，避免以后取回半张结果。
+  slot.w = -1;
+  slot.source = source;
+  if (!slot.result || slot.result.length !== total) slot.result = new Float64Array(total);
+  gaussScratch = recycled && recycled.length === total ? recycled : new Float64Array(0);
+  blurWithGaussTable(source, tcl, slot.result, w, h, kernel);
+  slot.w = w; slot.h = h; slot.r = r; slot.stamp = ++gaussMemoClock;
 }
 
 /**

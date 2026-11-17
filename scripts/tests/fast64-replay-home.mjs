@@ -139,7 +139,8 @@ try {
       assert.deepEqual(current.values, values); assert.equal(current.invalidHeights, 0); assert.equal(current.invalidColors, 0);
       assert.ok(current.quadrantPeaks.every(value => value > 0), 'all four quarters must contain visible geometry');
     }
-    assert.equal(await total(), expectedTotal);
+    // ⚠️ 侧栏按 10Hz 节流刷新，点图画两帧可能比一次刷新还短；要等它追上最后一帧，立刻读会读到上一帧的 0。
+    await page.waitForFunction(expected => Number(document.querySelector('.aside .pressData')?.textContent) === expected, expectedTotal);
     await page.screenshot({ path: join(artifacts, 'replay-restored.png') });
     await mode('原始数据');
     await page.locator('.canvasNum canvas').first().waitFor();

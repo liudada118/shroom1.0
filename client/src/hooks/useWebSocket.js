@@ -12,10 +12,13 @@
  *   - 组件卸载时自动清理
  *
  * 使用示例：
- *   const { sendMessage, lastMessage, readyState } = useWebSocket('ws://localhost:19999', {
+ *   const { sendMessage, readyState } = useWebSocket('ws://localhost:19999', {
  *     onMessage: (data) => console.log(data),
  *     autoReconnect: true,
  *   });
+ *
+ * ⚠️ 消息默认只走 onMessage，不写进 state：传感帧每秒几十到上百条，写 state 会让
+ * 调用它的组件连同整棵子树按帧率重渲染（现象：监测页一来数据就掉帧）。
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -42,7 +45,8 @@ export const ReadyState = {
  * @param {function} [options.onOpen] - 连接成功回调
  * @param {function} [options.onClose] - 连接关闭回调
  * @param {function} [options.onError] - 错误回调
- * @returns {{ sendMessage, sendRaw, lastMessage, readyState, reconnect, disconnect }}
+ * @param {boolean} [options.trackLastMessage=false] - 为 true 才把每条消息存进 lastMessage（会逐条触发重渲染）
+ * @returns {{ sendMessage, sendRaw, lastMessage, readyState, reconnect, disconnect }} lastMessage 未开启时恒为 null
  */
 export default function useWebSocket(url, options = {}) {
   const {
@@ -55,6 +59,7 @@ export default function useWebSocket(url, options = {}) {
     onClose,
     onError,
     channels = EMPTY_CHANNELS,
+    trackLastMessage = false,
   } = options;
 
   const wsRef = useRef(null);
@@ -68,6 +73,9 @@ export default function useWebSocket(url, options = {}) {
   // 保存最新的回调引用，避免重连时闭包问题
   const callbacksRef = useRef({ onMessage, onOpen, onClose, onError });
   callbacksRef.current = { onMessage, onOpen, onClose, onError };
+  // 放进 ref：切换这个开关不应重建连接。
+  const trackLastMessageRef = useRef(trackLastMessage);
+  trackLastMessageRef.current = trackLastMessage;
 
   const connect = useCallback(() => {
     if (unmountedRef.current || !enabled || !url) return;
@@ -105,7 +113,7 @@ export default function useWebSocket(url, options = {}) {
       ws.onmessage = (event) => {
         if (unmountedRef.current) return;
         const data = decodeWebSocketPayload(event.data);
-        setLastMessage(data);
+        if (trackLastMessageRef.current) setLastMessage(data);
         callbacksRef.current.onMessage?.(data, event);
       };
 

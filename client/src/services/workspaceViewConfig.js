@@ -1,4 +1,5 @@
 import { validateWorkspaceViewSnapshot } from '@shroom/frontend/renderers/shared/three/workspaceViewTools.js';
+import { validateMatrixViewSnapshot } from '@shroom/frontend/renderers/shared/matrixViewTransform.js';
 import { selectedNativeSystemId } from '../displays/nativeSystemTemplates';
 
 const PREFIX = 'shroom.workspaceView.v1:';
@@ -12,10 +13,13 @@ export function workspaceViewStorageKey({ systemId, sensorType, mode = 'normal' 
   return `${PREFIX}${JSON.stringify([identity, mode])}`;
 }
 
-/** 只保留有限的场景快照，损坏缓存不阻止画布使用。 */
+/**
+ * 只保留有限的场景快照，损坏缓存不阻止画布使用。
+ * 3D 场景存镜头与对象变换，数字矩阵只存展示方向（翻转和圈数）；两种互不通用，由各自的工具在恢复时再校验。
+ */
 function serializeSnapshot(snapshot) {
   try {
-    if (!validateWorkspaceViewSnapshot(snapshot)) return null;
+    if (!validateWorkspaceViewSnapshot(snapshot) && !validateMatrixViewSnapshot(snapshot)) return null;
     const value = JSON.stringify(snapshot);
     return value.length <= MAX_BYTES ? value : null;
   } catch { return null; }

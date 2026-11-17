@@ -138,6 +138,82 @@ describe('旧点图视角中心', () => {
     tools.reset();
     expect(object.matrixWorld.elements).toEqual(initial.elements);
   });
+  it('没有传点图平面的场景（座椅、仓储）不提供旋转 90°', () => {
+    const object = new Group(), camera = new PerspectiveCamera(40, 1, 1, 150000);
+    camera.position.set(0, 200, 300);
+    const controls = { target: new Vector3(), target0: new Vector3(), update: vi.fn(), reset: vi.fn() };
+    const tools = createPointViewTools({ object, camera, controls });
+    expect(tools.rotateQuarter).toBeUndefined();
+    expect(tools.flip('x')).toBe(true); expect(tools.getState()).toMatchObject({ flipX: true, quarterTurns: 0 });
+  });
+  it('小床旋转 90° 绕底面中心转整幅画面：中心、镜头和压力顶点不动，四次回到原位', () => {
+    const localCenter = new Vector3(-50, 0, -50);
+    const { object, plane, camera, controls, tools } = fixture(localCenter);
+    const center = plane.localToWorld(localCenter.clone()), initial = object.matrixWorld.clone();
+    const cameraMatrix = camera.matrixWorld.clone(), target = controls.target.clone();
+    const positions = Array.from(plane.geometry.attributes.position.array);
+    /** 点图自身 +X（列增大方向）在世界里的指向。 */
+    const columns = () => new Vector3(1, 0, 0).transformDirection(plane.matrixWorld);
+    const rows = () => new Vector3(0, 0, 1).transformDirection(plane.matrixWorld);
+    const startColumns = columns(), startRows = rows();
+    expect(tools.rotateQuarter()).toBe(true);
+    expect(plane.localToWorld(localCenter.clone()).distanceTo(center)).toBeLessThan(1e-10);
+    // 顺时针：原来朝右的列方向转到原来朝下的行方向。
+    expect(columns().dot(startRows)).toBeCloseTo(1, 10); expect(rows().dot(startColumns)).toBeCloseTo(-1, 10);
+    expect(camera.matrixWorld.elements).toEqual(cameraMatrix.elements);
+    expect(controls.target.toArray()).toEqual(target.toArray());
+    expect(Array.from(plane.geometry.attributes.position.array)).toEqual(positions);
+    expect(tools.getState()).toMatchObject({ quarterTurns: 1, selectionSafe: false });
+    // 转过之后翻转、倾斜、俯视、缩放都仍然围绕同一个底面中心。
+    for (const [method, args] of [['flip', ['x']], ['flip', ['y']], ['rotate', ['x']], ['top', []], ['zoom', [1]]]) {
+      expect(tools[method](...args)).toBe(true);
+      expect(plane.localToWorld(localCenter.clone()).distanceTo(center)).toBeLessThan(1e-10);
+      expect(controls.target.distanceTo(center)).toBeLessThan(1e-10);
+    }
+    tools.reset();
+    expect(tools.getState()).toMatchObject({ flipX: false, flipY: false, quarterTurns: 0, selectionSafe: true });
+    expect(Math.max(...object.matrixWorld.elements.map((value, index) => Math.abs(value - initial.elements[index])))).toBeLessThan(1e-10);
+    for (let index = 0; index < 4; index++) tools.rotateQuarter();
+    expect(Math.max(...object.matrixWorld.elements.map((value, index) => Math.abs(value - initial.elements[index])))).toBeLessThan(1e-10);
+    expect(tools.getState().quarterTurns).toBe(0);
+  });
+  it('转过 90° 的小床点俯视仍保持旋转后的方向，保存后重新挂载恢复同一画面', () => {
+    const localCenter = new Vector3(-50, 0, -50), first = fixture(localCenter);
+    /** 列增大方向在屏幕上的指向：x 为右、y 为上。 */
+    const screenColumns = ({ plane, camera }) => {
+      plane.updateWorldMatrix(true, false); camera.updateMatrixWorld(true);
+      const direction = new Vector3(1, 0, 0).transformDirection(plane.matrixWorld).transformDirection(camera.matrixWorldInverse);
+      // 加 0 把舍入出来的 -0 归成 0，方向只看落在哪条屏幕轴上。
+      return [Math.round(direction.x) + 0, Math.round(direction.y) + 0];
+    };
+    first.tools.top(); expect(screenColumns(first)).toEqual([1, 0]);
+    first.tools.rotateQuarter(); first.tools.top();
+    expect(screenColumns(first)).toEqual([0, -1]);
+    const saved = first.tools.getSnapshot();
+    expect(saved.quarterTurns).toBe(1);
+    const second = fixture(localCenter);
+    expect(second.tools.restoreSnapshot(JSON.parse(JSON.stringify(saved)))).toBe(true);
+    expect(screenColumns(second)).toEqual([0, -1]);
+    expect(second.tools.getState().quarterTurns).toBe(1);
+    second.tools.rotateQuarter(-1); second.tools.top();
+    expect(screenColumns(second)).toEqual([1, 0]);
+  });
+  it('没给底面中心的点图转过 90° 后，俯视和缩放的镜头与没转时一致，画面只在原地转', () => {
+    const plain = fixture(), turned = fixture();
+    turned.tools.rotateQuarter();
+    // 旋转绕点图中心转，对象自己的原点被带着走了；镜头目标不能跟过去。
+    expect(turned.object.position.distanceTo(plain.object.position)).toBeGreaterThan(1);
+    for (const method of ['top', 'zoom']) {
+      expect(plain.tools[method](1)).toBe(true); expect(turned.tools[method](1)).toBe(true);
+      expect(turned.controls.target.distanceTo(plain.controls.target)).toBeLessThan(1e-9);
+      expect(turned.camera.position.distanceTo(plain.camera.position)).toBeLessThan(1e-9);
+      expect(turned.camera.up.distanceTo(plain.camera.up)).toBeLessThan(1e-9);
+    }
+    // 转满四圈后不再需要补偿，目标就是对象原点。
+    for (let index = 0; index < 3; index++) turned.tools.rotateQuarter();
+    turned.tools.zoom(-1);
+    expect(turned.controls.target.distanceTo(turned.object.position)).toBeLessThan(1e-9);
+  });
   it('保存旋转镜像后的底面补偿，重新挂载恢复同一中心和镜头且默认复位不受污染', async () => {
     const localCenter = new Vector3(-50, 0, -50), first = fixture(localCenter);
     const received = [];

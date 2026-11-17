@@ -43,7 +43,7 @@ const RENDERER_IDS = [
 ];
 
 /** 所有后端都有的那四个，由 `NumMatrixRenderer` 自己实现，不随后端变。 */
-const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw', 'getSelectionTools', 'changeSelectFlag'];
+const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw', 'getSelectionTools', 'changeSelectFlag', 'getViewTools'];
 
 /**
  * 两个带命令的后端的 `commandNames` 并集，去重后排序。
@@ -162,8 +162,9 @@ describe('两条热力的描述符', () => {
    * 重合。要是哪天有人把它们合成一个 id，下面这两条会红。
    */
   it('两种热力图均声明调节能力查询，blobHeatmap 不冒充 changeColor', () => {
+    // `getViewTools` 只有斑点 WebGL 那条有：它提供展示旋转 90°，Canvas 2D 那条没接。
     expect([...getRendererDescriptor('webglHeatmap').methods].sort()).toEqual([
-      'bthClickHandle', 'changeColor', 'getTuningControls', 'sitData', 'sitValue',
+      'bthClickHandle', 'changeColor', 'getTuningControls', 'getViewTools', 'sitData', 'sitValue',
     ]);
     expect([...getRendererDescriptor('blobHeatmap').methods].sort()).toEqual([
       'bthClickHandle', 'getTuningControls', 'sitData', 'sitValue',

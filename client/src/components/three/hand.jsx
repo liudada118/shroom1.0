@@ -266,7 +266,7 @@ const Canvas = React.forwardRef((props, refs) => {
       CTRL_KEY, // zoom
       CMD_KEY, // pan
     ];
-    workspaceViewRef.current = createWorkspaceViewTools({ object: group, camera, controls });
+    workspaceViewRef.current = createWorkspaceViewTools({ object: group, camera, controls, plane: particles });
     if (props.portalEmbedded) selectionRef.current = createPointGridSelection({ points: particles, camera,
       canvas: renderer.domElement, columns: sitnum1, rows: sitnum2, interpolation: sitInterp, padding: sitOrder,
       onInteractionChange: (active) => { controlsFlag = !active; syncControlsEnabled(); } });

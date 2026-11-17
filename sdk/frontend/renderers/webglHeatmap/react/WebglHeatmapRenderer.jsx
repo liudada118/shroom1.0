@@ -32,6 +32,7 @@ import React, {
 
 import { normalizeWebglHeatmapParams } from '../core/params.js';
 import { createMatrixVisualTuning } from '../../shared/matrixVisualTuning.js';
+import { createMatrixViewTools } from '../../shared/matrixViewTransform.js';
 import {
   buildHeatPoints,
   frameStats,
@@ -69,6 +70,20 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
     dirty: true,
     visual: createMatrixVisualTuning({ width: params.dataWidth, height: params.dataHeight, max: params.max, filter: params.filter }),
   });
+
+  // 展示方向（旋转 90°、水平 / 纵向翻转）：这张图没有文字，直接变换画布元素。
+  // ⚠️ 只加 CSS 变换，画布里的像素不动；`bthClickHandle` 交出去导出的仍是原来方向的图。
+  const viewToolsRef = useRef(null);
+  useEffect(() => {
+    const tools = createMatrixViewTools(({ flipX, flipY, quarterTurns }) => {
+      if (!canvasRef.current) return;
+      // CSS 变换从右往左作用：先镜像，再顺时针转。
+      canvasRef.current.style.transform = [quarterTurns ? `rotate(${quarterTurns * 90}deg)` : '',
+        flipX || flipY ? `scale(${flipX ? -1 : 1}, ${flipY ? -1 : 1})` : ''].filter(Boolean).join(' ');
+    });
+    viewToolsRef.current = tools;
+    return () => { tools.dispose(); if (viewToolsRef.current === tools) viewToolsRef.current = null; };
+  }, []);
 
   // 预设换了要跟着换调参基线，否则切预设只改尺寸不改阈值。
   useEffect(() => {
@@ -243,6 +258,7 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
     changeColor,
     bthClickHandle,
     getTuningControls,
+    getViewTools: () => viewToolsRef.current,
   }), [sitData, sitValue, changeColor, bthClickHandle, getTuningControls]);
 
   return (

@@ -90,11 +90,16 @@ body:has(.fiber-portal .system-selector-backdrop.is-open) { overflow: hidden; }
 .fiber-portal .portal-runtime-monitor .aside > * { border-radius: 8px; }
 .fiber-portal .portal-runtime-monitor .title,
 .fiber-portal .portal-runtime-monitor .aside > *,
-.fiber-portal .portal-runtime-monitor .setIconItem { border: 1px solid color-mix(in srgb, var(--system-accent) 21%, rgba(126, 170, 205, .18)); background: linear-gradient(105deg, color-mix(in srgb, var(--system-accent) 4%, transparent), transparent 30%), linear-gradient(145deg, rgba(6, 20, 34, .84), rgba(2, 9, 18, .74)); box-shadow: 0 28px 88px rgba(0, 0, 0, .34), inset 0 1px rgba(255, 255, 255, .026); backdrop-filter: blur(16px); }
+.fiber-portal .portal-runtime-monitor .setIconItem { border: 1px solid color-mix(in srgb, var(--system-accent) 21%, rgba(126, 170, 205, .18)); background: linear-gradient(105deg, color-mix(in srgb, var(--system-accent) 4%, transparent), transparent 30%), linear-gradient(145deg, rgba(6, 20, 34, .94), rgba(2, 9, 18, .9)); box-shadow: 0 28px 88px rgba(0, 0, 0, .34), inset 0 1px rgba(255, 255, 255, .026); }
 .fiber-portal .portal-runtime-monitor .setIcons { top: 152px; right: 24px; pointer-events: auto; z-index: 12; }
 .fiber-portal .portal-runtime-monitor .progressContent { pointer-events: auto; z-index: 12; }
 .fiber-portal .portal-runtime-monitor .portal-data-renderer { position: absolute; inset: 0; pointer-events: auto; }
 .fiber-portal .system-selector-backdrop.is-data-view .system-scene-particle-host { visibility: hidden; }
+/* ⚠️ 监测页盖住全窗后撤掉首页、浮尘和遮罩模糊：留着的话每帧都要对整窗重算模糊，核显会满载。
+   延后 0.4s 等监测底板淡入完；返回动画一开始（data-monitor-return）就立即恢复，接上渐显。 */
+.fiber-portal:has(> .system-selector-backdrop.is-data-view:not([data-monitor-return="true"])) > .portal-page,
+.fiber-portal .system-selector-backdrop.is-data-view:not([data-monitor-return="true"]) > .system-selector-dust { visibility: hidden; transition: visibility 0s .4s; }
+.fiber-portal .system-selector-backdrop.is-data-view:not([data-monitor-return="true"]) { backdrop-filter: none; transition: backdrop-filter 0s .4s; }
 /* 手部真实画布独立占满视口，后台准备不改变列表及预览的几何位置。 */
 .fiber-portal .system-selector-backdrop.is-direct-entry.is-data-view > .system-selector-panel {
   opacity: 0 !important; visibility: hidden; pointer-events: none;
@@ -117,6 +122,8 @@ body:has(.fiber-portal .system-selector-backdrop.is-open) { overflow: hidden; }
 .fiber-portal .portal-monitor-navigation { position: absolute; top: 20px; left: 24px; right: 24px; z-index: 20; display: flex; justify-content: space-between; gap: 12px; pointer-events: none; }
 .fiber-portal .portal-monitor-navigation button,
 .fiber-portal .portal-expanded-toolbar button { min-height: 44px; padding: 8px 16px; color: rgba(230, 243, 255, .82); background: rgba(5, 16, 29, .68); border: 1px solid rgba(119, 178, 222, .28); border-radius: 999px; backdrop-filter: blur(12px); cursor: pointer; pointer-events: auto; transition: border-color 200ms ease, background 200ms ease, color 200ms ease; }
+/* 监测页的返回/关闭按钮压在实时画布上，不用毛玻璃。 */
+.fiber-portal .portal-monitor-navigation button { background: rgba(5, 16, 29, .88); backdrop-filter: none; }
 .fiber-portal .portal-monitor-navigation button:hover,
 .fiber-portal .portal-expanded-toolbar button:hover { border-color: rgba(99, 213, 255, .62); background: rgba(13, 45, 70, .72); color: #fff; }
 @media (max-width: 820px), (max-height: 560px) {

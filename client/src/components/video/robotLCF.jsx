@@ -158,6 +158,8 @@ const Canvas = React.forwardRef((props, refs) => {
   const bodyCanvas = useRef()
   const handHeatmap1Ref = useRef()
   const handHeatmapRef = useRef()
+  // 监测页在 init 之前回放的调节值；init 结束后按先后套用。
+  const earlyColorCallsRef = useRef([])
 
   function init() {
     container = document.getElementById(`canvas${props.index}`);
@@ -447,9 +449,7 @@ const Canvas = React.forwardRef((props, refs) => {
     };
     // initSet();
 
-
-
-
+    for (const config of earlyColorCallsRef.current) changeColor(config);
   }
 
   function addCanvas(model, canvas) {
@@ -872,7 +872,13 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
 
+  /**
+   * 调节热力图的颜色上限、热点大小、过滤，以及灯光亮度。
+   * ⚠️ 监测页在本组件挂载的同一刻就会回放保存过的调节值，这时 init 还没跑、热力图还不存在；
+   *   直接写会抛错，整个监测页跟着白屏。所以先记下来，init 结束后再套用。
+   */
   function changeColor({ max, size, filter, light, speedValue }) {
+    if (!handHeatmapRef.current) { earlyColorCallsRef.current.push({ max, size, filter, light, speedValue }); return }
     console.log(handHeatmapRef.current)
     console.log(max, size)
     if (max) handHeatmapRef.current.options.max = max

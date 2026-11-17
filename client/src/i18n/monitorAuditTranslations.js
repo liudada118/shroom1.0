@@ -841,6 +841,31 @@ export default {
       "en": "Mirror along the model X axis without changing source data, collection or export. Click again to restore.",
       "ja": "モデルの X 軸に沿って反転表示します。元データ・収集・出力は変わりません。再度押すと戻ります。"
     },
+    "rotateQuarter": {
+      "zh": "旋转 90°",
+      "en": "Rotate 90°",
+      "ja": "90° 回転"
+    },
+    "rotateQuarterHint": {
+      "zh": "整幅画面顺时针旋转 90°，转满四次回到原位。只改变显示方向，不改变原始数据、采集、存储或导出。",
+      "en": "Rotate the whole picture 90° clockwise; four turns return to the start. Only the display changes; source data, collection, storage and export stay the same.",
+      "ja": "画面全体を時計回りに 90° 回転します。4 回で元に戻ります。表示のみ変わり、元データ・収集・保存・出力は変わりません。"
+    },
+    "rotateQuarterUnavailable": {
+      "zh": "当前显示方式暂不支持旋转 90°，请切换到 3D 点图或规则矩阵的原始数据。",
+      "en": "This display mode cannot be rotated 90°. Switch to the 3D point map or regular-matrix raw data.",
+      "ja": "この表示モードは 90° 回転に対応していません。3D ポイント図または規則マトリクスの生データに切り替えてください。"
+    },
+    "flipHorizontalFlatHint": {
+      "zh": "把当前画面左右镜像。只改变显示方向，不改变原始数据、采集、存储或导出。再次点击恢复。",
+      "en": "Mirror the current picture left to right. Only the display changes; source data, collection, storage and export stay the same. Click again to restore.",
+      "ja": "現在の画面を左右反転します。表示のみ変わり、元データ・収集・保存・出力は変わりません。再度押すと戻ります。"
+    },
+    "flipVerticalFlatHint": {
+      "zh": "把当前画面上下镜像。只改变显示方向，不改变原始数据、采集、存储或导出。再次点击恢复。",
+      "en": "Mirror the current picture top to bottom. Only the display changes; source data, collection, storage and export stay the same. Click again to restore.",
+      "ja": "現在の画面を上下反転します。表示のみ変わり、元データ・収集・保存・出力は変わりません。再度押すと戻ります。"
+    },
     "flipVertical": {
       "zh": "纵向翻转",
       "en": "Flip vertically",

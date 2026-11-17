@@ -1,4 +1,5 @@
 /* 以 fiber-sensor 最后生效的三栏布局为准；覆盖层不替换原生数据。 */
+/* ⚠️ 监测层的面板不要加 backdrop-filter：下面的画布每帧重绘，模糊就得逐帧重算，核显会满载、整页掉帧。 */
 .fiber-portal .portal-model-status { position: absolute; inset: 0; display: grid; place-items: center; color: #c4d6e7; font-size: 15px; pointer-events: none; }
 .fiber-portal [data-model-state="ready"] > .portal-model-status { display: none; }
 .fiber-portal .portal-runtime-monitor {
@@ -79,7 +80,7 @@ body:has(.portal-runtime-monitor.is-scene-only) * { cursor: none !important; }
   max-height: min(440px, calc(100dvh - 150px)); overflow-y: auto; padding: 14px;
   border: 1px solid rgba(197, 220, 235, .16); border-radius: 12px;
   background: linear-gradient(148deg, rgba(13, 27, 38, .98), rgba(3, 13, 23, .98));
-  box-shadow: 0 24px 64px rgba(0, 5, 13, .42); backdrop-filter: blur(18px);
+  box-shadow: 0 24px 64px rgba(0, 5, 13, .42);
 }
 .fiber-portal .portal-runtime-monitor .title .portal-native-controls.is-open { display: flex; }
 .fiber-portal .portal-controls-heading { flex: 0 0 100%; display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid rgba(137, 178, 207, .11); font-size: 12px; }
@@ -91,9 +92,9 @@ body:has(.portal-runtime-monitor.is-scene-only) * { cursor: none !important; }
   position: absolute; z-index: 10; top: var(--portal-chart-top); bottom: var(--portal-chart-bottom); left: 22px;
   display: grid; width: var(--left-chart-width); grid-template-rows: 54px minmax(0, 1fr); padding: 10px 10px 12px;
   box-sizing: border-box; isolation: isolate; overflow: hidden; border: 1px solid rgba(201, 220, 233, .16); border-radius: 16px;
-  background: radial-gradient(circle at 8% -12%, rgba(229, 194, 119, .17), transparent 38%), radial-gradient(circle at 108% 112%, color-mix(in srgb, var(--system-accent) 14%, transparent), transparent 44%), linear-gradient(145deg, rgba(27, 32, 37, .9), rgba(4, 15, 27, .86));
+  background: radial-gradient(circle at 8% -12%, rgba(229, 194, 119, .17), transparent 38%), radial-gradient(circle at 108% 112%, color-mix(in srgb, var(--system-accent) 14%, transparent), transparent 44%), linear-gradient(145deg, rgba(27, 32, 37, .96), rgba(4, 15, 27, .94));
   box-shadow: 0 26px 70px rgba(0, 5, 13, .44), inset 0 1px rgba(236, 245, 251, .08), inset 0 -1px rgba(93, 150, 191, .08);
-  backdrop-filter: blur(22px) saturate(125%); pointer-events: auto;
+  pointer-events: auto;
   transition: visibility 0s;
 }
 .fiber-portal .portal-observatory::before { content: ''; position: absolute; inset: 0; z-index: -1; background: radial-gradient(circle at 18% 0%, rgba(248, 217, 151, .1), transparent 28%), linear-gradient(112deg, rgba(255, 255, 255, .025), transparent 38%, color-mix(in srgb, var(--system-accent) 5%, transparent)); pointer-events: none; }
@@ -142,9 +143,9 @@ body:has(.portal-runtime-monitor.is-scene-only) * { cursor: none !important; }
   position: relative; display: grid; width: 100%;
   grid-template-rows: 46px auto 44px; gap: 8px; padding: 10px; box-sizing: border-box; overflow: hidden;
   border: 1px solid rgba(197, 220, 235, .16); border-radius: 16px;
-  background: radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--system-accent) 11%, transparent), transparent 38%), linear-gradient(148deg, rgba(13, 27, 38, .94), rgba(3, 13, 23, .9));
+  background: radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--system-accent) 11%, transparent), transparent 38%), linear-gradient(148deg, rgba(13, 27, 38, .97), rgba(3, 13, 23, .95));
   box-shadow: 0 24px 64px rgba(0, 5, 13, .42), inset 0 1px rgba(231, 243, 250, .06);
-  backdrop-filter: blur(18px) saturate(118%); pointer-events: auto;
+  pointer-events: auto;
 }
 .fiber-portal .portal-quick-tools::before { content: ''; position: absolute; top: 0; right: 14px; width: 72px; height: 1px; background: linear-gradient(90deg, transparent, var(--system-accent)); box-shadow: 0 0 14px color-mix(in srgb, var(--system-accent) 22%, transparent); }
 .fiber-portal .portal-quick-tools header { display: flex; align-items: center; justify-content: space-between; padding: 0 3px 7px; border-bottom: 1px solid rgba(137, 178, 207, .11); }

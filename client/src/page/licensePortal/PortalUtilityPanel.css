@@ -6,7 +6,7 @@
   border: 1px solid rgba(197, 220, 235, .28); border-radius: 16px; overflow: hidden;
   color: var(--portal-text); background: radial-gradient(circle at 6% -20%, color-mix(in srgb, var(--system-accent) 12%, transparent), transparent 34%), linear-gradient(148deg, rgba(13, 27, 38, .98), rgba(3, 13, 23, .97));
   box-shadow: 0 26px 72px rgba(0, 5, 13, .52), inset 0 1px rgba(231, 243, 250, .09);
-  backdrop-filter: blur(22px) saturate(118%); opacity: 0; pointer-events: none; visibility: hidden;
+  opacity: 0; pointer-events: none; visibility: hidden;
   transform: translateY(16px); transition: opacity 180ms ease, transform 280ms cubic-bezier(.22, 1, .36, 1), visibility 0s 280ms;
 }
 .fiber-portal .portal-utility-panel::before { content: ''; position: absolute; top: 0; left: 18px; width: 132px; height: 1px; background: linear-gradient(90deg, var(--system-accent), transparent); }

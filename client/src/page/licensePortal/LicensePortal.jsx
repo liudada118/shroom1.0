@@ -339,7 +339,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
 
   return <div ref={portalRef} className="fiber-portal">
     <main className="portal-page" inert={selectorOpen} aria-hidden={selectorOpen}>
-      <PressureParticleField className="pressure-field" />
+      <PressureParticleField className="pressure-field" paused={selectorOpen} />
       <div ref={setHomeHost} className="portal-mushroom-ambient" aria-hidden="true" />
       <header className="portal-topbar">
         <div className="portal-brand"><img alt="Shroom" className="portal-logo" draggable={false} src={BRAND_LOGO_SRC} /></div>

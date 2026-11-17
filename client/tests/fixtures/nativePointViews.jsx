@@ -37,6 +37,7 @@ function NativePointViews() {
       snapshot() {
         const support = readWorkspaceToolSupport(renderer.current);
         return { name, available: Boolean(support.view), select: support.select,
+          turnable: typeof support.view?.rotateQuarter === 'function',
           state: support.view?.getState(), disposed: disposedViews.current.map((view) => view?.getState().available),
           oldAction: disposedViews.current.at(-1)?.rotate('x') };
       },

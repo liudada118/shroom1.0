@@ -5,12 +5,30 @@ import { useEffect, useRef } from "react";
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
-/** 绘制首页底部装饰点阵，并在卸载时清理动画和观察器。 */
+// 圆点位置固定，只有亮度和半径随波纹缓慢变化，100ms 内不到一个色阶，空闲时降频重画看不出差别；
+// 指针高亮要跟手，移动时提到约 30 帧。阈值略小于整数帧间隔，避免被刷新抖动多拖一帧。
+const IDLE_REDRAW_MS = 98;
+const POINTER_REDRAW_MS = 31;
+
+/**
+ * 绘制首页底部装饰点阵，并在卸载时清理动画和观察器。
+ * ⚠️ 被系统列表或监测页盖住时必须传 paused：画布仍在视口内，可见性观察器不会停它。
+ * ⚠️ 不要改回每帧重画：一帧约两千个圆点，会占满显卡进程（现象：首页显卡占用高、监测页掉帧）。
+ *
+ * @param {boolean} [paused=false] 为 true 时停在当前画面，恢复后接着原相位走。
+ */
 function PressureParticleField({
   className,
-  style
+  style,
+  paused = false
 }) {
   const canvasRef = useRef(null);
+  const pausedRef = useRef(paused);
+  const resumeRef = useRef(null);
+  pausedRef.current = paused;
+  useEffect(() => {
+    if (!paused) resumeRef.current?.();
+  }, [paused]);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -24,6 +42,20 @@ function PressureParticleField({
     let animationFrame = 0;
     let isVisible = true;
     let disposed = false;
+    // 暂停期间不推进波纹相位，恢复时不会跳到别处。
+    let pausedAt = 0;
+    let pausedTotal = 0;
+    let lastDrawAt = -Infinity;
+    let phase = 0;
+    let pointerMoved = false;
+    /** 安排下一帧；暂停时记下时刻，供恢复后扣除。 */
+    const scheduleNext = () => {
+      if (pausedRef.current) {
+        if (!pausedAt) pausedAt = performance.now();
+      } else if (!reducedMotion.matches && isVisible) {
+        animationFrame = window.requestAnimationFrame(draw);
+      }
+    };
     /** 从独立容器计算尺寸和 DPR。 */
     const resize = () => {
       const parent = canvas.parentElement ?? canvas;
@@ -37,10 +69,21 @@ function PressureParticleField({
       canvas.style.height = `${height}px`;
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     };
-    /** 绘制一帧装饰点阵，最多保持一条动画循环。 */
-    const draw = (time = 0) => {
+    /** 绘制一帧装饰点阵，最多保持一条动画循环；不带时间戳的调用（尺寸变化）立即重画。 */
+    const draw = (frameTime = 0) => {
       animationFrame = 0;
       if (disposed) return;
+      if (frameTime && frameTime - lastDrawAt < (pointerMoved ? POINTER_REDRAW_MS : IDLE_REDRAW_MS)) {
+        scheduleNext();
+        return;
+      }
+      if (frameTime) {
+        lastDrawAt = frameTime;
+        phase = frameTime - pausedTotal;
+      }
+      pointerMoved = false;
+      // 尺寸变化触发的重画沿用上一帧相位，降频后不会让波纹跳一下再跳回来。
+      const time = phase;
       context.clearRect(0, 0, width, height);
       const startY = Math.max(0, height * 0.58);
       const spacing = width < 700 ? 24 : 22;
@@ -72,25 +115,30 @@ function PressureParticleField({
           context.fill();
         }
       }
-      if (!reducedMotion.matches && isVisible) {
-        animationFrame = window.requestAnimationFrame(draw);
-      }
+      scheduleNext();
     };
     /** 恢复可见时的动画循环，避免重复调度。 */
     const requestDraw = () => {
-      if (animationFrame || reducedMotion.matches || !isVisible) return;
+      if (animationFrame || reducedMotion.matches || !isVisible || pausedRef.current) return;
+      if (pausedAt) {
+        pausedTotal += performance.now() - pausedAt;
+        pausedAt = 0;
+      }
       animationFrame = window.requestAnimationFrame(draw);
     };
+    resumeRef.current = requestDraw;
     /** 记录指针位置，用于装饰高亮。 */
     const onPointerMove = (event) => {
       const bounds = canvas.getBoundingClientRect();
       pointer.x = event.clientX - bounds.left;
       pointer.y = event.clientY - bounds.top;
       pointer.active = true;
+      pointerMoved = true;
     };
     /** 移除指针高亮。 */
     const onPointerLeave = () => {
       pointer.active = false;
+      pointerMoved = true;
     };
     /** 响应减少动画设置，重新绘制静态帧。 */
     const onMotionChange = () => {
@@ -122,6 +170,7 @@ function PressureParticleField({
     requestDraw();
     return () => {
       disposed = true;
+      resumeRef.current = null;
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
       window.removeEventListener("pointermove", onPointerMove);

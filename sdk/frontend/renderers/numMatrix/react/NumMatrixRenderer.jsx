@@ -47,6 +47,7 @@
  * | `factory.commandNames` | canvas2d / webgl | 上面那些方法的名字，供 `useImperativeHandle` 用 |
  * | `setRawFrame(data)` | webgl | 接管 `changeWsDataRaw`：不过滤，按原始显示布局统计并上屏 |
  * | `sensorGrid` | sprite3d / webgl 规则矩阵 | 提供采样点投影、矩阵尺寸和指针控制，供框选与物理量尺使用 |
+ * | `setViewTransform(view)` | sprite3d / webgl 规则矩阵 | 展示方向（旋转 90°、水平 / 纵向翻转）：只重排上屏的画面，本层据此提供 `getViewTools` |
  *
  * **为什么非得开这几个口子。** 接 `canvas2d` 时本来只该往 `BACKEND_FACTORIES`
  * 加一行（这个文件原来的注释就是这么写的），实际不够：`NumWs.jsx` 暴露 12 个
@@ -75,6 +76,7 @@ import { createCanvas2dMatrixBackend } from './backends/canvas2d.js';
 import { createSpriteMatrixBackend } from './backends/sprite3d.js';
 import { createWebglMatrixBackend } from './backends/webgl.js';
 import { createPointGridSelection } from '../../shared/gridSelection.js';
+import { createMatrixViewTools } from '../../shared/matrixViewTransform.js';
 
 /**
  * 后端分派表。
@@ -94,7 +96,7 @@ const BACKEND_FACTORIES = {
  * 后端可以再往上挂自己的（`factory.commandNames`），两者拼起来就是
  * `useImperativeHandle` 的全集。名字只有这一处，不会和后端那份漂移。
  */
-const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw', 'getSelectionTools', 'changeSelectFlag'];
+const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw', 'getSelectionTools', 'changeSelectFlag', 'getViewTools'];
 
 /**
  * 可共享的调参对象。
@@ -147,6 +149,9 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
       backend: null,
       api: null,
       lastRawFrame: null,
+      // 展示方向（翻转、旋转）跟着组件实例走，换网格或配色重建场景后不会弹回原样；null 表示从没改过。
+      displayView: null,
+      viewTools: null,
     };
   }
 
@@ -243,6 +248,12 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
         if (peakRef.current) peakRef.current.textContent = String(index);
       },
     });
+    // ⚠️ 展示方向只交给后端重排画面；sitData / reportStats 走的帧不经过它，侧栏统计与采集读到的顺序不变。
+    state.viewTools = state.backend.setViewTransform ? createMatrixViewTools((view) => {
+      state.displayView = view;
+      state.backend?.setViewTransform?.(view);
+    }, state.displayView) : null;
+    if (state.viewTools && state.displayView) state.backend.setViewTransform(state.displayView);
     if (state.backend.sensorGrid) {
       selection = createPointGridSelection({ ...state.backend.sensorGrid,
         onSelectionChange: () => reportStats(lastStats) });
@@ -316,6 +327,8 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
       sitData,
       sitValue,
       getSelectionTools: () => selection,
+      // 后端不支持改展示方向（分区、双脚、手套版面和 canvas2d）时返回 null，工具箱据此禁用旋转和翻转按钮。
+      getViewTools: () => state.viewTools,
       changeSelectFlag: (cameraEnabled) => selection?.setActive(!cameraEnabled),
       changeWsData: (wsPointData) => sitData({ wsPointData }, propsRef.current.local),
 
@@ -337,6 +350,8 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
 
     return () => {
       state.api = null;
+      state.viewTools?.dispose();
+      state.viewTools = null;
       selection?.dispose();
       state.backend?.dispose();
       state.backend = null;

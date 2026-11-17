@@ -1,9 +1,13 @@
 import { Vector3 } from 'three';
 import { createWorkspaceViewTools } from '../../renderers/workspaceViewTools';
 
-/** 给偏置或倾斜的旧点图接入统一工具，镜头围绕真实垫面中心移动。 */
-export function createPointViewTools({ object, camera, controls, plane = object, localCenter = null }) {
-  const tools = createWorkspaceViewTools({ object, camera, controls });
+/**
+ * 给偏置或倾斜的旧点图接入统一工具，镜头围绕真实垫面中心移动。
+ * ⚠️ 只有显式传了 plane（真正的点图平面）才有「旋转 90°」；座椅这类只传整组对象的场景没有。
+ */
+export function createPointViewTools({ object, camera, controls, plane: pointPlane = null, localCenter = null }) {
+  const plane = pointPlane || object;
+  const tools = createWorkspaceViewTools({ object, camera, controls, plane: pointPlane, planeCenter: localCenter });
   /** 使用固定底面中心，避免压力高度变化带着旋转中心漂移。 */
   const centerTarget = () => {
     if (localCenter) {
@@ -11,7 +15,8 @@ export function createPointViewTools({ object, camera, controls, plane = object,
       controls.target.copy(localCenter).applyMatrix4(plane.matrixWorld);
     } else {
       object.updateWorldMatrix(true, true);
-      object.getWorldPosition(controls.target);
+      // 展示旋转会带着对象原点走，镜头目标要落回没转时的位置，俯视和缩放才不会跳。
+      tools.beforeTurn(object.getWorldPosition(controls.target));
     }
   };
   /** 同步当前观察目标与镜头方向，不覆盖初始复位快照。 */
@@ -84,7 +89,7 @@ export function createPointViewTools({ object, camera, controls, plane = object,
       const distance = Math.max(camera.near * 4, camera.position.distanceTo(controls.target));
       const normal = new Vector3(0, 1, 0).transformDirection(plane.matrixWorld);
       camera.position.copy(controls.target).add(normal.multiplyScalar(distance));
-      camera.up.copy(new Vector3(0, 0, -1).transformDirection(plane.matrixWorld));
+      camera.up.copy(tools.screenUp(plane));
       camera.lookAt(controls.target);
       controls.update();
       camera.updateMatrixWorld(true);
