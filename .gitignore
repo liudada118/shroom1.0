@@ -58,3 +58,6 @@ pack-resources/python/
 /frontend-cache/
 /usage-analytics/
 /device-identity
+
+# Local-only end-to-end automation suite (scripts, cases, launchers, run output). Not uploaded.
+/自动化测试/

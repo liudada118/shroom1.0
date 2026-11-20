@@ -227,3 +227,13 @@ curl.exe -f https://shroom.jq-industries.com/shroom1/latest.yml
 
 Mac 共用新的更新基础地址，但本上传命令只发布 Windows 文件；
 Mac 的 `latest-mac.yml`、ZIP、DMG 需要按现有 Mac 发布流程单独迁移。
+
+## 按地区选择更新地址（2026-11-19，随下一个安装包生效）
+
+- 客户端有两个安装包更新地址：国内 `https://images.jq-industries.com/shroom/software/`，国外 `https://shroom.jq-industries.com/shroom1`。
+- 系统时区为中国大陆（如 `Asia/Shanghai`、`Asia/Urumqi`）时先访问国内地址，其余时区先访问国外地址。首选地址网络不通或返回 5xx 时，自动改用另一个地址再检查一次；两个都失败才提示用户。
+- 404、403、校验失败不换地址，直接报出，避免掩盖发布问题。
+- **发布要求不变但更严格**：每次发版两个地址都要上传完全相同的安装包、`.blockmap`、版本说明和清单（Windows `latest.yml`，Mac `latest-mac.yml`），清单最后上传。只发一处时，另一地区的客户读到的是旧清单，会一直显示"已是最新"且不报错。
+- 发布后两个地址都要核对：清单版本号、安装包大小与摘要、Range 请求返回 HTTP 206。
+- `package.json build.publish` 与安装包内 `app-update.yml` 仍写国内地址，不要改成国外地址：它现在只提供下载缓存目录名和签名信息，`npm run upload` 的地址校验也依赖它。
+- 1.1.49 及更早版本不具备此能力，仍只访问各自内置的单一地址。

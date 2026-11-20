@@ -1,7 +1,19 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-11-17
+> 最后更新于：2026-11-20
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
+
+2026-11-20 自动化测试套件收进 `自动化测试/` 且不上传：原 `scripts/automation` → `自动化测试/scripts`，原 `docs/automation-testing` → `自动化测试/docs`，`scripts/tests/portal-monkey.mjs` → `自动化测试/scripts/portal-monkey.mjs`，运行结果与便携包改写到 `自动化测试/test-results/`；`.gitignore` 忽略整个文件夹，仓库里不再有这套脚本，换电脑要单独拷。入口 `node 自动化测试/scripts/run.mjs --mode …` 或文件夹里的三个 cmd。⚠️ 套件用 `../../` 找仓库根，脚本目录必须保持在仓库根下两层；便携包里它放在 `suite/automation/`（cmd 必须纯 ASCII，不能带中文目录名）。⚠️ 直接在仓库里 `npm run build` 会把这个文件夹按 `**/*` 打进安装包——`package.json` 的 `build.files` 没有排除它；从冻结快照打包（只取 git 可见文件）不受影响。本文更早条目与 `ARCHITECTURE.md` 历史记录里的旧路径按此对应。
+
+2026-11-19 小床监测坐床边语音也改按床状态播报（覆盖下一条里「坐床边仍只看 `merged_alarm=14`」的说法）：`jqbedAlarmSpeech.js` 的 `BED_STATE_ALERTS` 列出「床状态一变成它就直接播」的状态——0 播 `leftBed`、4 播 `satUp`；会话里第一个有效状态只记录不播，按状态播过后床状态再变之前不为同一种 `merged_alarm` 重播。进入监测时人已坐在床边的情况仍由 `merged_alarm=14` 播一次。⚠️ 不做防抖：床状态在 1 和 4 之间来回跳时每次变成 4 都会播；从离床直接坐到床边（0→4）也会播。只改了客户端，后端与算法参数未动。验证入口同下一条。详见架构文末记录。
+
+2026-11-19 小床监测离床语音改按床状态播报：`client/src/page/home/jqbedAlarmSpeech.js` 的 `createJqbedAlarmSpeechState` 在会话内床状态由 1/3/4 变为 0 时播 `leftBed`，不再等 `merged_alarm=10`（它要先连续在床满 `continuous_on_bed_duration_minutes`；实测该参数约 6 秒/单位，填 0 按约 180 秒，不是界面写的分钟）。坐床边仍只看 `merged_alarm=14`，SOS 规则不变。床状态来自后端 `petCareRuntimeService` 在 `jqbedAlgorithmDiagnostics` 新增的 `stateInBbed`，缺失时回退同包 `rate.stateInBbed`。⚠️ 不能只放在 `rate` 里：呼吸率为 -1 的帧不下发 `rate`。验证入口 `jqbedAlarmSpeech.test.js`、`backend/tests/server/onbedReturnedWiring.test.js`、`jqbedDiagnostics.test.js`；触及实时消息，执行 Full。源码版本同日升为 1.1.50（三语说明 `release-notes/windows/{,en/,ja/}1.1.50.md`），安装包尚未生成。详见架构文末记录。
+
+2026-11-18 版本历史中英日三份：弹窗按界面语言读 `release-notes/windows/*.md`（中文）、`windows/en/`、`windows/ja/`，每个版本每种语言一个文件；某版本缺译文或译文为空则整条回退中文，版本列表以中文为准。读取入口 `client/src/components/updater/releaseNoteSources.jsx`（⚠️ 必须是 `.jsx`：混淆插件只处理 `.js`/`.ts` 且早于 Vite 解析 `import.meta.glob`，改成 `.js` 生产构建报 `Expected ',', got '<eof>'`，单元测试查不出来），构建与回退在 `releaseNoteHistory.js` 的 `buildLocalizedVersionHistory` / `selectVersionHistory`。⚠️ 中文文件位置不能搬，`inject-release-notes.js` 与 `build-mac-release.js` 按它写 `latest.yml`。新增版本必须三份都建，`releaseNoteCoverage.test.js` 会点名缺哪种语言。自动更新弹窗的 `latest.yml` 说明仍只有中文。详见架构文末记录。
+
+2026-11-18 线上埋点报错处理：内置系统导出 CSV 的文件名直接拼采集名称（内置系统的历史行 `channel_id` 为空，走 `backend/kernel/csv/csvDownloadService.js` 的旧数据分支），名称含 `/ \ ? * " < > |` 或过长时报 `ENOENT`，含 `:` 时显示成功但文件为空；现由 `sanitizeLegacyFileLabel` 只替换非法字符并按 160 字节限长，合法名称不变（验证入口 `backend/tests/csv/csvDownloadService.test.js`）。监测页 `page/home/util.js` 七处 `com.current.chartReset()` 加可选链。⚠️ 错误日志要把 Error 对象交给 `logger.error`，只传 `err.message` 时上报不带原因、错误码和堆栈（已改 10 处）；`backend/common/logger.js` 的兜底不能补任意字段，`errorDiagnostics.test.js` 有断言。后台 155 次「后端操作异常」全部来自 1.1.43 及更早版本。详见架构文末记录。
+
+2026-11-18 小床监测侧栏统计改按原始 32×32 点阵：`jqbed` 的「压力总和 / 平均压力 / 峰值压力 / 有效点数」原来统计 2× 插值再横向拉伸 2× 后的显示网格（128×64 = 8192 格），有人的时候有效点数会显示 7000–8000；现在四项都取传感器原始点阵（最多 1024 点），显示网格只用于上屏。⚠️ 阈值要按原始值给（显示值 = 原始值 ×10，故 `valuej1*0.025` → `valuej1*0.0025`）；框选范围落在显示网格上，原始点 (x, y) 对应第 `interp*x+interp/2` 行、第 `(interp*y+interp/2)*xStretch` 起的列，行列是对调的。取数逻辑在 `components/three/smallBedAsideStats.js`，验证入口 `client/src/components/three/smallBedAsideStats.test.js`；Standard 验证通过。其它 3D 视图仍统计显示网格，口径未统一。详见架构文末记录。
 
 2026-11-17 Windows 1.1.49 交付与手套 / 触觉上衣修复：源码版本 1.1.49，新增 `release-notes/windows/1.1.49.md`。安装包从未提交的工作区快照构建（提交 `05456e5` 加 58 个未提交路径，清单在交付目录的 `release-manifest.json`），冻结 1762 文件；Full 18 项、产物 8 项、交付 24 项、NSIS 2803 文件摘要通过，交付至 `C:/Users/23823/Downloads/Shroom-1.1.49`（同目录 `Shroom-1.1.49-superseded` 是作废的较早一版），未上传、未安装；源码已提交为 `9f0abdd`（未推送）。同日修复：监测页回放保存的调节值早于渲染器 `init()` 导致白屏（`components/video/hand.jsx`、`robot copyblue.jsx`、`robotSY.jsx`、`robotLCF.jsx` 的 `changeColor` 先记下、`init()` 结束后套用，验证入口 `node scripts/tests/saved-tuning-before-init.mjs`）；触觉手套右手热力地图错位——⚠️ 后端给右手的通道帧是 32×32 皮肤布局、左手才是 16×16 硬件矩阵，`page/home/gloveExhibition.js` 只把正好 256 点的数据当硬件矩阵，`gloveTerrain/terrainField.js` 的 `rawSamples` 右手只镜像整块（验证入口 `node scripts/tests/glove-right-hand-frames.mjs`，用后端映射造帧；前端手套夹具的右手帧形状与真实后端不同，不能用来判断右手）。右手按指腹摇操不动未复现，待现场确认校准。详见架构文末记录。
 
@@ -126,6 +138,12 @@
 同日再次合并 `origin/Revise` f879c49（merge f84fe1a）：小床独立回传/客户端订阅日志与告警播报迁入现有 algorithm-channel/WS 装配，旧根server/test不恢复。原始矩阵改由 `Home.buildNumMatrixParams` → `NumMatrix` WebGL raw，统一蓝底和左侧/底部一基索引；行列号不进入数据。小床设置右侧直达，无模型点图复用 `getViewTools`，卸载回收与选区安全保持。Agent规则点图默认与手部同为4层显示补零边，物理点表不补边；12B方向与降采样元数据沿现有protocol透传且只转置一次。验证入口 `raw-matrix-style.mjs`、`native-point-view-tools.mjs`、实际Home原始矩阵专项、JQBed回传与协议测试；跨SDK和后台合并执行Full。
 
 同日原始数字交互回归：`numMatrix/react/backends/webgl.js` 补齐原sprite3d的光标中心滚轮缩放和左键平移，同步变换数字、热场与外侧索引；框选/量尺启用时互斥，投影读取实际画布边界。缩放不改压力、采集或导出，卸载移除监听与指针捕获；入口测试 `webglGlove.test.js` 与实际Home `native-raw-home.mjs`，涉及共享前端SDK执行Full。
+
+2026-11-18 自动化测试套件（用例驱动）：`node 自动化测试/scripts/run.mjs --mode smoke|full|soak`，按 `自动化测试/docs/` 的用例表执行。页面阶段用真实门户与监测页（`client/tests/fixtures/portalLauncher.jsx`），WS 19999 / HTTP 19245 由 `自动化测试/scripts/simHost.mjs` 在浏览器内接管，帧由生产 `buildSensorFrameEnvelope` 构造；`components` 阶段直接调用 `scripts/verify-release-workflow.cjs --source` 验证真实后端模块与临时 SQLite；结果写唯一运行目录的 `report.html`（可视化）/`report.json`/`report.md` 与 `cases.jsonl`、`actions.jsonl`、`heartbeat.jsonl`，断言失败、页面异常、命令契约不符或清理失败都会使退出码为 1。既有回归脚本通过 `--legacy` 复用，不重写其断言。实测发现：小床系统在 Shift 组合键后按 Tab 抛 `TypeError: Cannot read properties of null (reading '0')`（`TrackballControls` keydown 读取 `smallBed.jsx` 置空的 `controls.keys`），`hand` 系统不复现，修复属渲染器变更，尚未修改。
+
+2026-11-19 打包软件实测：双击 `自动化测试/测试打包软件.cmd`（= `run.mjs --mode packaged`）。`自动化测试/scripts/appDriver.mjs` 检查进程与端口后启动 `Shroom.exe` 并经 CDP 接入窗口，`cases/packaged.mjs` 跑 18 条用例，其中 TC-SOAK-004 一直随机操作到输入 `q` 回车或运行目录出现 `STOP` 文件。报告只在结束时生成一次，写到 `自动化测试/test-results/automation/run-*/report.html`；`自动化测试/生成报告.cmd` 可随时补生成。使用本机真实用户数据与密钥，截图里的密钥输入框打码；未连接设备，不在真实软件上采集。启动被测程序前必须去掉环境变量 `ELECTRON_RUN_AS_NODE`。说明见 `自动化测试/docs/README.md`。
+
+2026-11-19 逐个系统遍历与便携测试包：`自动化测试/scripts/cases/sweep.mjs` 把系统列表里的每个系统进一遍、把“显示”面板里的每种展示方式切一遍（TC-ENTRY-004 / TC-VIEW-008，每个系统一个数据变体），`--mode sweep|full` 用模拟后台跑内置系统，`packaged` 在真实软件上跑本机授权的系统；只判断画面出现、无渲染报错组件、无脚本异常，画面内容看截图。`自动化测试/生成便携测试包.cmd`（`tools/buildPortable.mjs`）把软件、脚本、依赖和 Node 运行时打成 `自动化测试/test-results/portable/ShroomTest-*.zip`，另一台电脑解压后双击包内 cmd 即可；包内靠 `suite/portable.json` 进入便携模式，只支持 `packaged` 与 `artifact`。遍历只允许碰 `.portal-display-native`、`.portal-renderer-controls`、`.portal-glove-controls` 三组控件，不能放宽到“串口参数”和“校准”。
 
 ## 1. 一分钟判断路径
 
@@ -336,3 +354,5 @@ Agent 复制链路：`tools/toolSchemas.js` → `tools/index.js` 的 `prepare_du
 二维数字蓝色矩阵：`matrixDisplayModes` 与后端渲染目录为 `numMatrix` 使用原生 `sprite3d` 后端的平面蓝色矩阵，名字不按底层绘制技术判断维度。`frameInput: raw` 的精灵矩阵直接消费映射后帧，不过滤、不模糊、不转置；旧内置过滤预设保持原样。验证目录及工作区测试、`manifest-workspace-layout.mjs` 的真实数字纹理索引、平面实例坐标、蓝色像素及旧别名恢复；共享 SDK 变更执行 Full。
 
 本机 Git 归档：`build/`、三个 `seatpad32-*` 配置目录和打包空模板可随分支保存；`.gitignore` 排除 `managed-system-catalog.json` 和 `system-package-staff-credential.json`，保留机器凭据及授权缓存。构建快照不代表当前源码已重新编译；正式构建仍先写入临时目录，打包模板须保持空库并通过完整性检查。
+
+安装包更新选源（2026-11-19）：`app/update/autoUpdater.js` 的 `UPDATE_SOURCES` + `orderUpdateSources` 按系统时区决定先访问 images（大陆时区）还是 shroom（其余），`checkForUpdates` 在首选地址网络不通或返回 5xx 时用 `setFeedURL` 换另一个地址重查，两个都失败才提示一次。打包配置 `app-update.yml` 未改，只提供缓存目录名。⚠️ 两个地址必须发布完全相同的文件；只对包含本改动的新安装包生效。测试：`backend/tests/application/autoUpdater.test.js`。详见 `ARCHITECTURE.md`「2026-11-19 安装包更新按地区选源」。

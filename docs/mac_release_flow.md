@@ -23,8 +23,8 @@
    在根目录 `package.json` 中修改 `version`。
 
 2. 补充本次发布说明  
-   默认新建或更新 `release-notes/windows/<version>.md`。  
-   mac 正式打包会优先复用这份 Windows 发布说明写入 `latest-mac.yml`，只有历史版本缺少 Windows 说明时才回退到 `release-notes/mac/<version>.md`。
+   默认新建或更新 `release-notes/windows/<version>.md`，并同时补齐 `release-notes/windows/en/<version>.md` 与 `release-notes/windows/ja/<version>.md`（应用内版本历史按界面语言读取这三份，缺译文回退中文）。  
+   mac 正式打包会优先复用中文这份 Windows 发布说明写入 `latest-mac.yml`，只有历史版本缺少 Windows 说明时才回退到 `release-notes/mac/<version>.md`。
 
 3. 确认更新源地址  
    `package.json > build.publish` 当前配置的是 generic provider:
@@ -341,7 +341,7 @@ npm run build-mac-share
 ## 9. 一次正式发版的最小操作清单
 
 1. 修改 `package.json` 版本号
-2. 新建 `release-notes/windows/<version>.md`
+2. 新建 `release-notes/windows/<version>.md`，并同步 `release-notes/windows/en/<version>.md`、`release-notes/windows/ja/<version>.md`（应用内版本历史按界面语言读取；缺译文会回退中文，`releaseNoteCoverage.test.js` 会报缺哪一份。`latest.yml` / `latest-mac.yml` 仍只注入中文那份）
 3. 确认更新源地址无需调整
 4. 执行 `npm run build-mac-release`
 5. 验证 `dist/` 下 zip、dmg、`latest-mac.yml` 已生成

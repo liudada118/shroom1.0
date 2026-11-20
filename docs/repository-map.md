@@ -134,7 +134,7 @@ flowchart LR
 | 目录 | 当前性质 | 处理结论 |
 | --- | --- | --- |
 | `build/` | Electron 固定读取的前端构建资源 | 保留现路径；移动会影响稳定入口 |
-| `release-notes/` | Windows/macOS 版本说明源文件 | 保留；版本历史在前端构建时读取 Windows Markdown |
+| `release-notes/` | Windows/macOS 版本说明源文件 | 保留；版本历史在前端构建时读取 `windows/`（中文）、`windows/en/`、`windows/ja/`，每个版本每种语言一个文件 |
 | `display-systems/` | 可配置展示系统工作区 | 保留，不是临时目录 |
 | `db/` | 初始化库与本机历史数据库 | 只跟踪 `init.db`；历史库不得移动或删除 |
 | `pack-resources/` | 打包资源暂存 | 被打包配置使用；当前保留 |
@@ -143,6 +143,7 @@ flowchart LR
 | `runtime/uploads/` | 开发态报告上传中间图片 | 与导出分开保存，整体忽略 |
 | `runtime/temp/` | 运行临时文件及已收拢的本地残留 | 取消 Git 跟踪并忽略，不作为源码 |
 | `test-results/` | 测试工具可能重新生成的状态目录 | 已取消 Git 跟踪并忽略 |
+| `自动化测试/` | 端到端自动化测试套件：`scripts/`（原 `scripts/automation`）、`docs/`（原 `docs/automation-testing`）、双击入口 cmd、`test-results/` 运行结果 | 仅本机保留，整个文件夹被 Git 忽略、不上传；换电脑需单独拷贝 |
 | `test/manual/legacy-runtime/` | 早期串口和 WebSocket 人工调试资料 | 从根 `runtime/legacy` 迁入测试区，不参与生产 |
 | `project/` | 无生产引用的旧模型/原型 | 已移除；15 个资源与正式模型逐个哈希相同，其余原型可由 Git 历史恢复 |
 
