@@ -235,7 +235,7 @@ function createHistorySessionService({
         ...buildZeroPlaybackPayload(),
       });
     } catch (error) {
-      logger.error('[History] failed to load selected history:', error.message || error);
+      logger.error('[History] failed to load selected history', error);
       patchPlaybackState({
         indexArr: [0, 0],
         localData: [],

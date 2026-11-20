@@ -28,6 +28,10 @@
  *     }]
  *   }
  * }
+ *
+ * 更新源分流:
+ * 打包配置只决定下载缓存目录；每次检查实际访问哪个地址由 UPDATE_SOURCES 与系统时区决定
+ * （中国大陆时区先走 images，其余先走 shroom），首选地址连不上时自动改用另一个。
  */
 
 const { autoUpdater } = require("electron-updater");
@@ -35,6 +39,51 @@ const { ipcMain, dialog } = require("electron");
 const logger = require("../../backend/common/logger");
 const { recordBusinessEvent } = require('../../backend/common/businessEvents');
 const { describeUpdaterError, createUpdaterLogger } = require('./updaterErrors');
+
+/**
+ * 安装包更新源。
+ * ⚠️ 两处必须由发布流程保持文件完全一致；只发了一处时，另一地区的客户会一直停在旧版本且不报错。
+ */
+const UPDATE_SOURCES = Object.freeze({
+  domestic: "https://images.jq-industries.com/shroom/software/",
+  overseas: "https://shroom.jq-industries.com/shroom1",
+});
+
+/** 视为中国大陆的系统时区；港澳台时区不在内，按海外处理。 */
+const MAINLAND_CHINA_TIME_ZONES = new Set([
+  "Asia/Shanghai", "Asia/Chongqing", "Asia/Chungking", "Asia/Harbin", "Asia/Urumqi", "Asia/Kashgar", "PRC",
+]);
+
+/** 读取系统时区；读不到时返回空字符串，由调用方按海外处理。 */
+function readSystemTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 按时区排出更新源的访问顺序：第一个是首选，第二个只在首选连不上时使用。
+ * 时区只是地区的近似判断，判断错了由换源兜底，不会导致更新失败。
+ * @param {string} timeZone - IANA 时区名，例如 Asia/Shanghai
+ * @returns {string[]} 两个更新源地址
+ */
+function orderUpdateSources(timeZone) {
+  return MAINLAND_CHINA_TIME_ZONES.has(timeZone)
+    ? [UPDATE_SOURCES.domestic, UPDATE_SOURCES.overseas]
+    : [UPDATE_SOURCES.overseas, UPDATE_SOURCES.domestic];
+}
+
+/**
+ * 判断一次失败是否值得换另一个地址重试：连不上、超时、域名解析失败，或服务端 5xx（如 CDN 回源 502）。
+ * 404、403、校验失败属于发布问题，换地址只会掩盖它，所以不算。
+ * @param {{code: string, httpStatus?: number}} failure - describeUpdaterError 的结果
+ * @returns {boolean}
+ */
+function isSourceUnavailable(failure) {
+  return failure.code === "UPDATE_NETWORK_UNAVAILABLE" || failure.httpStatus >= 500;
+}
 
 /** Read the transport error only for the bounded retry decision. */
 function getUpdaterErrorMessage(error) {
@@ -58,7 +107,8 @@ class AppUpdater {
    * @param {boolean} options.autoDownload - 是否自动下载（默认 false，让用户确认后再下载）
    * @param {boolean} options.autoInstallOnAppQuit - 退出时自动安装（默认 true）
    * @param {number} options.checkInterval - 自动检查间隔（ms，默认 4 小时）
-   * @param {string} options.feedUrl - 自定义更新服务器 URL（可选）
+   * @param {string} options.feedUrl - 自定义更新服务器 URL（可选）；传入后只用这一个地址，不再按地区分流
+   * @param {string} options.timeZone - 用于地区判断的时区，默认读取系统时区
    * @param {string} options.platform - 运行平台，默认使用 process.platform
    */
   constructor(mainWindow, options = {}) {
@@ -76,15 +126,21 @@ class AppUpdater {
     // 配置 autoUpdater
     autoUpdater.autoDownload = options.autoDownload || false;
     autoUpdater.autoInstallOnAppQuit = options.autoInstallOnAppQuit !== false;
-    autoUpdater.logger = createUpdaterLogger(logger, this.platform);
+    this._sources = options.feedUrl
+      ? [options.feedUrl]
+      : orderUpdateSources(options.timeZone === undefined ? readSystemTimeZone() : options.timeZone);
+    this._workingSource = null;
+    this._fallbackPending = 0;
+    this._retryingSource = false;
 
-    // 如果有自定义更新服务器
-    if (options.feedUrl) {
-      autoUpdater.setFeedURL({
-        provider: "generic",
-        url: options.feedUrl,
-      });
-    }
+    // 备用地址还没试之前，引擎自己记录的失败只算告警，避免换源成功仍被当成一次更新故障。
+    const engineLogger = createUpdaterLogger(logger, this.platform);
+    autoUpdater.logger = {
+      ...engineLogger,
+      error: (...args) => (this._fallbackPending > 0 ? engineLogger.warn : engineLogger.error)(...args),
+    };
+
+    this._useSource(this._sources[0]);
 
     this._bindEvents();
     this._bindIPC();
@@ -101,6 +157,8 @@ class AppUpdater {
     // 检查更新出错
     autoUpdater.on("error", (err) => {
       const failure = describeUpdaterError(err, this.platform);
+      // 还有备用地址可试时先不提示；备用地址也失败才由最后一次检查统一上报。
+      if (this._fallbackPending > 0 && isSourceUnavailable(failure)) return;
       logger.error("[Updater] 安装包更新失败:", failure);
       this._sendStatus({
         type: "update-error",
@@ -110,6 +168,8 @@ class AppUpdater {
 
     // 正在检查更新
     autoUpdater.on("checking-for-update", () => {
+      // 换源重查属于同一次检查，不重复推送状态和计数。
+      if (this._retryingSource) return;
       logger.info("[Updater] 正在检查更新...");
       this._sendStatus({
         type: "checking-for-update",
@@ -261,10 +321,22 @@ class AppUpdater {
   }
 
   /**
-   * 检查更新
-   * @returns {Promise}
+   * 让更新引擎改用指定地址检查和下载。
+   * ⚠️ 下载沿用最近一次检查成功时的地址，所以只在检查前切换，不要在下载过程中调用。
+   * @param {string} url - 更新源地址
    */
-  async checkForUpdates() {
+  _useSource(url) {
+    autoUpdater.setFeedURL({ provider: "generic", url });
+  }
+
+  /** 本次检查的访问顺序：上次连得上的地址优先，省得每 4 小时都先等首选地址超时。 */
+  _orderedSources() {
+    if (!this._workingSource || this._sources[0] === this._workingSource) return this._sources;
+    return [this._workingSource, ...this._sources.filter((url) => url !== this._workingSource)];
+  }
+
+  /** 对当前地址检查一次；只有响应被截断时原地重试一次。 */
+  async _checkCurrentSource() {
     try {
       return await autoUpdater.checkForUpdatesAndNotify();
     } catch (err) {
@@ -276,6 +348,33 @@ class AppUpdater {
       await sleep(1500);
       return autoUpdater.checkForUpdatesAndNotify();
     }
+  }
+
+  /**
+   * 检查更新：先访问首选地址，连不上时改用另一个地址再查一次。
+   * 只有地址本身不可用（见 isSourceUnavailable）才换源；404、校验失败等发布问题直接抛出。
+   * @returns {Promise} 引擎的检查结果；所有地址都失败时抛出最后一次的错误
+   */
+  async checkForUpdates() {
+    const sources = this._orderedSources();
+    for (let index = 0; index < sources.length; index++) {
+      const hasFallback = index < sources.length - 1;
+      this._useSource(sources[index]);
+      this._retryingSource = index > 0;
+      if (hasFallback) this._fallbackPending++;
+      try {
+        const result = await this._checkCurrentSource();
+        this._workingSource = sources[index];
+        return result;
+      } catch (err) {
+        if (!hasFallback || !isSourceUnavailable(describeUpdaterError(err, this.platform))) throw err;
+        logger.warn("[Updater] 首选更新地址暂不可用，改用备用地址重新检查");
+      } finally {
+        if (hasFallback) this._fallbackPending--;
+        this._retryingSource = false;
+      }
+    }
+    return null;
   }
 
   async installDownloadedUpdate() {

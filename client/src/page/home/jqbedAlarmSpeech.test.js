@@ -2,7 +2,83 @@ import { describe, expect, it } from 'vitest';
 import { createJqbedAlarmSpeechState } from './jqbedAlarmSpeech';
 
 describe('jqbed alarm speech transitions', () => {
-  it('uses merged alarms while physical bed states and combined SOS guesses cannot trigger speech', () => {
+  it('announces leaving the bed on the bed-state change, however short the stay', () => {
+    const state = createJqbedAlarmSpeechState();
+    expect(state.observe({ stateInBbed: 0, merged_alarm: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 1, merged_alarm: 11 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 0, merged_alarm: 0 })).toEqual(['leftBed']);
+    expect(state.observe({ stateInBbed: 0, merged_alarm: 0 })).toEqual([]);
+    for (const inBed of [1, 3]) {
+      expect(state.observe({ stateInBbed: inBed })).toEqual([]);
+      expect(state.observe({ stateInBbed: 0 })).toEqual(['leftBed']);
+    }
+    expect(state.observe({ stateInBbed: 4 })).toEqual(['satUp']);
+    expect(state.observe({ stateInBbed: 0 })).toEqual(['leftBed']);
+  });
+
+  it('announces sitting on the bed edge as soon as the bed state becomes 4, without waiting for merged alarm 14', () => {
+    const state = createJqbedAlarmSpeechState();
+    expect(state.observe({ stateInBbed: 1, merged_alarm: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 0 })).toEqual(['satUp']);
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 0 })).toEqual([]);
+    for (const value of [-1, undefined, 2, '4']) expect(state.observe({ stateInBbed: value })).toEqual([]);
+    expect(state.observe({ stateInBbed: 4 })).toEqual([]);
+    for (const from of [1, 3, 0]) {
+      state.observe({ stateInBbed: from });
+      expect(state.observe({ stateInBbed: 4 })).toEqual(['satUp']);
+    }
+  });
+
+  it('does not repeat the same bed-edge sitting when merged alarm 14 arrives with or after the state change', () => {
+    const state = createJqbedAlarmSpeechState();
+    expect(state.observe({ stateInBbed: 1, merged_alarm: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 14 })).toEqual(['satUp']);
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 14 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 1, merged_alarm: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 0 })).toEqual(['satUp']);
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 14 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 10 })).toEqual(['leftBed']);
+  });
+
+  it('keeps merged alarm 14 for a session that starts on the bed edge, and resets the state memory', () => {
+    const state = createJqbedAlarmSpeechState();
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 14 })).toEqual(['satUp']);
+    expect(state.observe({ stateInBbed: 1, merged_alarm: 0 })).toEqual([]);
+    state.reset();
+    expect(state.observe({ stateInBbed: 4 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 1, sosflag: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 4, sosflag: 1 })).toEqual(['emergency']);
+    expect(state.observe({ stateInBbed: 4, merged_alarm: 14, sosflag: 2 })).toEqual([]);
+  });
+
+  it('does not repeat the same leave when the merged alarm 10 arrives with or after the state change', () => {
+    const state = createJqbedAlarmSpeechState();
+    expect(state.observe({ stateInBbed: 1, merged_alarm: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 0, merged_alarm: 10 })).toEqual(['leftBed']);
+    expect(state.observe({ stateInBbed: 0, merged_alarm: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 1, merged_alarm: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 0, merged_alarm: 0 })).toEqual(['leftBed']);
+    expect(state.observe({ stateInBbed: 0, merged_alarm: 10 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 0, merged_alarm: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 0, merged_alarm: 10 })).toEqual([]);
+  });
+
+  it('ignores invalid bed states and never treats the first known state as a leave', () => {
+    const state = createJqbedAlarmSpeechState();
+    for (const value of [-1, undefined, null, '0', 0.5, 2, 5, NaN]) {
+      expect(state.observe({ stateInBbed: value })).toEqual([]);
+    }
+    expect(state.observe({ stateInBbed: 0 })).toEqual([]);
+    expect(state.observe({ stateInBbed: 1 })).toEqual([]);
+    for (const value of [-1, undefined, 2, '0']) expect(state.observe({ stateInBbed: value })).toEqual([]);
+    expect(state.observe({ stateInBbed: 0 })).toEqual(['leftBed']);
+    state.reset();
+    expect(state.observe({ stateInBbed: 0 })).toEqual([]);
+  });
+
+  it('still uses merged alarms when no bed state is available, and never guesses from other fields', () => {
     const state = createJqbedAlarmSpeechState();
     expect(state.observe({ stateInBbed: 0, state_in_bed: 3 })).toEqual([]);
     expect(state.observe({ merged_alarm: 10 })).toEqual(['leftBed']);

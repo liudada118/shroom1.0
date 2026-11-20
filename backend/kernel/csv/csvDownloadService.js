@@ -69,6 +69,27 @@ function shortChannelHash(channelId) {
   return createHash('sha256').update(String(channelId || '')).digest('hex').slice(0, 8);
 }
 
+const LEGACY_FILE_LABEL_MAX_BYTES = 160;
+
+/**
+ * 旧数据（内置系统）导出文件名里的采集名称：只替换系统不允许的字符、过长时截断并补短 hash。
+ * ⚠️ 合法名称必须原样返回（包括空格），否则已有用户按文件名找不到以前导出的同名文件。
+ * ⚠️ 不清洗的后果：名称含 / \ ? * " < > | 时导出报 ENOENT；含 : 时 Windows 把内容写进备用数据流，界面显示成功但文件是空的。
+ * 长度按 UTF-8 字节算（macOS / Linux 单个文件名上限 255 字节），给前缀、重名后缀和扩展名留余量。
+ * @param {string} label 采集名称
+ * @returns {string} 可直接拼进文件名的名称
+ */
+function sanitizeLegacyFileLabel(label) {
+  const clean = String(label ?? '').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-');
+  if (Buffer.byteLength(clean) <= LEGACY_FILE_LABEL_MAX_BYTES) return clean;
+  let head = '';
+  for (const char of clean) {
+    if (Buffer.byteLength(head) + Buffer.byteLength(char) > LEGACY_FILE_LABEL_MAX_BYTES) break;
+    head += char;
+  }
+  return `${head}--${shortChannelHash(label)}`;
+}
+
 function validateWritableDirectory({ fs, path, targetDir }) {
   const dir = String(targetDir || '').trim();
   if (!dir) return { ok: false, error: 'download path is empty' };
@@ -84,7 +105,8 @@ function validateWritableDirectory({ fs, path, targetDir }) {
     } catch {
       // Ignore cleanup failure.
     }
-    return { ok: false, error: error.message };
+    // 带 code（如 EACCES / ENOSPC / EPERM）：上报时能区分是没权限、没空间还是路径非法。
+    return { ok: false, error: error.message, code: error.code };
   }
 }
 
@@ -535,7 +557,7 @@ function createCsvDownloadService({
 
     const label = formatDateLabel(date, timeStampToDateLabel);
     const fileName = descriptor.legacy
-      ? `${getCsvFilePrefix(sensorType, descriptor.outputChannel, downloadOptions)}${label}.csv`
+      ? `${getCsvFilePrefix(sensorType, descriptor.outputChannel, downloadOptions)}${sanitizeLegacyFileLabel(label)}.csv`
       : buildCanonicalFileName(descriptor, label);
     const filePath = allocateFilePath(dir, fileName, usedFilePaths, descriptor.source.key);
     await writeCsvFile({ fs, filePath, headers: buildHeaders(csvTitle), records });
@@ -570,7 +592,8 @@ function createCsvDownloadService({
 
     const csvExportDir = getCsvExportDirectory(downloadOptions);
     if (!csvExportDir.ok) {
-      logger?.error?.('[CSV] invalid export directory:', csvExportDir.error);
+      // ⚠️ 要把 Error 交给 logger，别只传 error.message：只传字符串时上报不带错误码和堆栈，后台分不清没权限/没空间/路径非法。
+      logger?.error?.('[CSV] invalid export directory', Object.assign(new Error(csvExportDir.error), csvExportDir.code ? { code: csvExportDir.code } : {}));
       publishResult('export csv failed', { error: csvExportDir.error });
       return { ok: false, error: csvExportDir.error };
     }
@@ -758,6 +781,7 @@ module.exports = {
   createCsvDownloadService,
   parseStoredData,
   sanitizeFileNameSegment,
+  sanitizeLegacyFileLabel,
   shortChannelHash,
   validateWritableDirectory,
   writeCsvFile,

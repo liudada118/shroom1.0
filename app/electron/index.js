@@ -341,7 +341,7 @@ ipcMain.handle("open-folder", async (event, data) => {
     }
     return { success: true };
   } catch (err) {
-    logger.error("[IPC] open-folder error:", err.message);
+    logger.error("[IPC] open-folder error", err);
     return { success: false, error: err.message };
   }
 });
@@ -355,7 +355,7 @@ ipcMain.handle("open-path", async (event, data) => {
     const error = await shell.openPath(filePath);
     return error ? { success: false, error } : { success: true };
   } catch (err) {
-    logger.error("[IPC] open-path error:", err.message);
+    logger.error("[IPC] open-path error", err);
     return { success: false, error: err.message };
   }
 });
@@ -377,7 +377,8 @@ ipcMain.handle("validate-path", async (event, data) => {
     } catch {
       // Ignore cleanup failure.
     }
-    logger.error("[IPC] validate-path error:", err.message);
+    // ⚠️ 传 err 而不是 err.message：只传字符串时后台只能看到标签，原因为空（线上 6 次全都没有信息）。
+    logger.error("[IPC] validate-path error", err);
     return { success: false, error: err.message };
   }
 });
@@ -935,7 +936,7 @@ app.whenReady().then(async () => {
             console.error('[Power-JS] 重连异常:', e);
           }
         })()
-      `).catch(err => logger.error('[Main] executeJavaScript 失败:', err.message));
+      `).catch(err => logger.error('[Main] executeJavaScript 失败', err));
     }, 1500);
   };
 

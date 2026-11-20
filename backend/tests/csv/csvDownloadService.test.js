@@ -5,6 +5,7 @@ const path = require('path');
 const {
   createCsvDownloadService,
   sanitizeFileNameSegment,
+  sanitizeLegacyFileLabel,
   shortChannelHash,
 } = require('../../kernel/csv/csvDownloadService');
 const { createHistoryFrameTransformService } = require('../../kernel/playback/historyFrameTransformService');
@@ -443,6 +444,38 @@ async function run() {
       legacyResult.artifacts.map((item) => item.outputChannel),
       ['sit', 'back', 'head'],
     );
+
+    // 内置系统（旧数据分支）的文件名直接带采集名称：合法名称一个字都不能变，非法字符和超长名称不能让导出失败。
+    assert.strictEqual(sanitizeLegacyFileLabel('性能测试_2026-11-18-15-32-47-474'), '性能测试_2026-11-18-15-32-47-474');
+    assert.strictEqual(sanitizeLegacyFileLabel('2026-11-18 15-32-47'), '2026-11-18 15-32-47', '没填名称时的旧文件名带空格，必须保持');
+    assert.strictEqual(sanitizeLegacyFileLabel('a/b\\c:d?e*f"g<h>i|j'), 'a-b-c-d-e-f-g-h-i-j');
+    const longLabel = `${'压'.repeat(120)}_2026-11-18-15-32-47-474`;
+    const shortened = sanitizeLegacyFileLabel(longLabel);
+    assert.ok(Buffer.byteLength(shortened) <= 160 + 10, '超长名称按 UTF-8 字节截断');
+    assert.ok(!shortened.includes('�') && shortened.startsWith('压压'), '截断不能切坏一个汉字');
+    assert.notStrictEqual(shortened, sanitizeLegacyFileLabel(`${'压'.repeat(120)}_2026-11-18-15-32-48-000`), '截断后不同采集仍得到不同文件名');
+
+    const namedRows = [{ id: 1, timestamp: 1000, data: '[5, 6]' }];
+    for (const [index, [label, expectedFile]] of [
+      ['a/b?c', 'sita-b-c_2026-11-18-15-32-47-474.csv'],
+      ['a\\b', 'sita-b_2026-11-18-15-32-47-474.csv'],
+      ['12:30', 'sit12-30_2026-11-18-15-32-47-474.csv'],
+      ['性能测试', 'sit性能测试_2026-11-18-15-32-47-474.csv'],
+      ['x'.repeat(300), null],
+    ].entries()) {
+      const namedDir = path.join(tempRoot, `named-${index}`);
+      const named = createService({
+        exportDir: namedDir, events: [], databases: { db }, descriptors: new Map([[db, []]]), rowsByKey: new Map(),
+        legacyRowsByDb: new Map([[db, namedRows]]),
+      });
+      const result = await named.service.exportHistoryCsv({ date: `${label}_2026-11-18-15-32-47-474 1763451167474` });
+      assert.strictEqual(result.ok, true, `采集名称 ${label.slice(0, 12)} 应能导出：${result.error || ''}`);
+      const written = fs.readdirSync(namedDir);
+      assert.strictEqual(written.length, 1, '只生成一个文件，不在导出目录里多出子目录');
+      if (expectedFile) assert.strictEqual(written[0], expectedFile);
+      assert.strictEqual(result.files[0], path.join(namedDir, written[0]));
+      assert.ok(fs.statSync(result.files[0]).size > 20, '内容写进了文件本身，不是备用数据流');
+    }
 
     console.log('csvDownloadService.test.js passed');
   } finally {

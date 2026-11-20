@@ -1173,7 +1173,7 @@ function loadSelectedHistory(dateLabel) {
       ...(headRows.length ? ['head'] : []),
     ] };
   } catch (error) {
-    logger.error('[History] failed to load selected history:', error.message || error);
+    logger.error('[History] failed to load selected history', error);
     broadcastHistorySelectionPayload({
       length: 0,
       time: [],

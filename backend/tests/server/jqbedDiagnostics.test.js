@@ -60,7 +60,7 @@ test('combines native diagnostics and physiological results without changing the
   const harness = createHarness();
   await harness.tick(); await harness.tick();
   assert.deepEqual(harness.sent[0].jqbedAlgorithmDiagnostics, {
-    sensorType: 'jqbed', reserved_bytes: result().reserved_bytes, merged_alarm: 0, sosflag: 0,
+    sensorType: 'jqbed', reserved_bytes: result().reserved_bytes, merged_alarm: 0, sosflag: 0, stateInBbed: 1,
   });
   assert.equal(harness.sent[0].rate.rate, 15);
   assert.equal(harness.sent[0].rate.onBedTime, 2);
@@ -73,7 +73,7 @@ for (const reserved of [[0, 0, 0, 0, 0, 0], [-1, -1, -1, -1, -1, -1, 19, 20], un
     const harness = createHarness({ output: result({ rate: -1, reserved_bytes: reserved }) });
     await harness.tick();
     assert.deepEqual(harness.sent, [{ jqbedAlgorithmDiagnostics: {
-      sensorType: 'jqbed', reserved_bytes: Array.isArray(reserved) ? reserved : [], merged_alarm: 0, sosflag: 0,
+      sensorType: 'jqbed', reserved_bytes: Array.isArray(reserved) ? reserved : [], merged_alarm: 0, sosflag: 0, stateInBbed: 1,
     } }]);
   });
 }
@@ -84,6 +84,8 @@ for (const [merged_alarm, sosflag] of [[10, 1], [0, 0], [-1, -1]]) {
     await harness.tick();
     assert.equal(harness.sent[0].jqbedAlgorithmDiagnostics.merged_alarm, merged_alarm);
     assert.equal(harness.sent[0].jqbedAlgorithmDiagnostics.sosflag, sosflag);
+    // 呼吸率为 -1 时不下发 rate，离床语音必须还能从诊断字段拿到床状态。
+    assert.equal(harness.sent[0].jqbedAlgorithmDiagnostics.stateInBbed, 1);
     assert.equal(harness.sent[0].rate, undefined);
     assert.equal(Object.hasOwn(harness.calls[0].args, 'includeRawOutputs'), false);
     assert.deepEqual(harness.logs, []);

@@ -134,3 +134,57 @@ export function buildVersionHistory(releaseNoteModules) {
       compareSemanticVersions(right.version, left.version)
     );
 }
+
+/** 版本历史支持的语言；第一项是兜底语言，也是打包时注入 `latest.yml` 的那一份。 */
+export const RELEASE_NOTE_LANGUAGES = ["zh", "en", "ja"];
+
+/**
+ * 按语言生成版本历史，某个版本没有译文（或译文是空的）时整条回退到中文。
+ * ⚠️ 版本列表以中文为准：只有译文、没有中文原文的版本在任何语言下都不显示。
+ *
+ * @param modulesByLanguage 形如 `{ zh, en, ja }`，值是各语言的 `import.meta.glob` 结果。
+ * @returns 形如 `{ zh: [...], en: [...], ja: [...] }`，每个数组与 `buildVersionHistory` 的返回同形。
+ */
+export function buildLocalizedVersionHistory(modulesByLanguage) {
+  const [fallbackLanguage] = RELEASE_NOTE_LANGUAGES;
+  const fallbackHistory = buildVersionHistory(
+    modulesByLanguage?.[fallbackLanguage]
+  );
+
+  return Object.fromEntries(
+    RELEASE_NOTE_LANGUAGES.map((language) => {
+      if (language === fallbackLanguage) return [language, fallbackHistory];
+
+      const translated = new Map(
+        buildVersionHistory(modulesByLanguage?.[language]).map((item) => [
+          item.version,
+          item,
+        ])
+      );
+
+      return [
+        language,
+        fallbackHistory.map((item) => {
+          const own = translated.get(item.version);
+          return own && own.changes.length > 0 ? own : item;
+        }),
+      ];
+    })
+  );
+}
+
+/**
+ * 取某个界面语言对应的版本历史。
+ *
+ * @param historyByLanguage `buildLocalizedVersionHistory` 的返回值。
+ * @param language i18next 的语言码，带地区后缀（`en-US`）也可以；不认识的语言给中文。
+ * @returns 该语言的版本历史数组。
+ */
+export function selectVersionHistory(historyByLanguage, language) {
+  const baseLanguage = String(language || "").toLowerCase().split("-")[0];
+  const key = RELEASE_NOTE_LANGUAGES.includes(baseLanguage)
+    ? baseLanguage
+    : RELEASE_NOTE_LANGUAGES[0];
+
+  return historyByLanguage?.[key] || [];
+}

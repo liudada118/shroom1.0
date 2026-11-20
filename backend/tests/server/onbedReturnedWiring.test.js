@@ -269,6 +269,75 @@ test('actual jqbed speech ignores legacy state/SOS fields and raw logs while rat
   assert.deepEqual(spokenKeys(home), ['satUp']);
 });
 
+test('jqbed announces leaving the bed as soon as the bed state changes, without waiting for merged alarm 10', () => {
+  const home = createHarness();
+  home.send({ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm: 0, sosflag: 0, stateInBbed: 1 } });
+  home.send({ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm: 0, sosflag: 0, stateInBbed: 0 } });
+  assert.deepEqual(spokenKeys(home), ['leftBed'], 'a short visit in bed still speaks on leaving');
+  home.send({ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm: 10, sosflag: 0, stateInBbed: 0 } });
+  assert.deepEqual(spokenKeys(home), ['leftBed'], 'the later merged alarm 10 must not repeat the same leave');
+  home.send({ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm: 0, sosflag: 0, stateInBbed: 1 } });
+  home.send({ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm: 10, sosflag: 0, stateInBbed: 0 } });
+  assert.deepEqual(spokenKeys(home), ['leftBed', 'leftBed'], 'the next leave speaks again');
+  home.send({ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm: 0, sosflag: 0, stateInBbed: 0 } });
+  home.send({ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm: 10, sosflag: 0, stateInBbed: 1 } });
+  assert.deepEqual(spokenKeys(home), ['leftBed', 'leftBed', 'leftBed'],
+    'a merged alarm 10 while still in bed is still a bed-exit report');
+
+  // 旧宿主的诊断字段里没有床状态，只能用同一个包里 rate 带的那份。
+  const legacyHost = createHarness();
+  legacyHost.send({ ...alarmDiagnostics(0), rate: { rate: 15, stateInBbed: 1, sosflag: 0 } });
+  legacyHost.send({ ...alarmDiagnostics(0), rate: { rate: 0, stateInBbed: 0, sosflag: 0 } });
+  assert.deepEqual(spokenKeys(legacyHost), ['leftBed']);
+
+  // 进入监测时床上本来就没人，或中间夹着无效帧（-1），都不算离床。
+  const emptyBed = createHarness();
+  for (const stateInBbed of [0, -1, 0, -1, 1, -1, 1]) {
+    emptyBed.send({ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm: stateInBbed < 0 ? -1 : 0, sosflag: stateInBbed < 0 ? -1 : 0, stateInBbed } });
+  }
+  assert.deepEqual(spokenKeys(emptyBed), []);
+  emptyBed.send({ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm: -1, sosflag: -1, stateInBbed: -1 } });
+  emptyBed.send({ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm: 0, sosflag: 0, stateInBbed: 0 } });
+  assert.deepEqual(spokenKeys(emptyBed), ['leftBed'], 'an invalid frame between in-bed and out-of-bed does not hide the leave');
+});
+
+test('jqbed announces sitting on the bed edge as soon as the bed state becomes 4, without waiting for merged alarm 14', () => {
+  const edgeState = (stateInBbed, merged_alarm = 0, sosflag = 0) => ({
+    jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', merged_alarm, sosflag, stateInBbed },
+  });
+  const home = createHarness();
+  home.send(edgeState(1));
+  home.send(edgeState(4));
+  assert.deepEqual(spokenKeys(home), ['satUp'], 'the bed-edge state speaks before any merged alarm');
+  assert.deepEqual(home.spoken.map((item) => item.text), ['home.alerts.satUp']);
+  home.send(edgeState(4));
+  home.send(edgeState(4, 14));
+  assert.deepEqual(spokenKeys(home), ['satUp'], 'the later merged alarm 14 must not repeat the same sitting');
+  home.send(edgeState(0));
+  assert.deepEqual(spokenKeys(home), ['satUp', 'leftBed'], 'leaving from the bed edge still speaks');
+  home.send(edgeState(1));
+  home.send(edgeState(4, 14));
+  assert.deepEqual(spokenKeys(home), ['satUp', 'leftBed', 'satUp'], 'the next sitting speaks again');
+
+  // 旧宿主的诊断字段里没有床状态，用同一个包里 rate 带的那份。
+  const legacyHost = createHarness();
+  legacyHost.send({ ...alarmDiagnostics(0), rate: { rate: 15, stateInBbed: 1, sosflag: 0 } });
+  legacyHost.send({ ...alarmDiagnostics(0), rate: { rate: 15, stateInBbed: 4, sosflag: 0 } });
+  assert.deepEqual(spokenKeys(legacyHost), ['satUp']);
+
+  // 进入监测时人已经坐在床边：状态不播，仍由 merged_alarm=14 播一次。
+  const alreadySitting = createHarness();
+  for (const stateInBbed of [4, -1, 4]) alreadySitting.send(edgeState(stateInBbed, stateInBbed < 0 ? -1 : 0, stateInBbed < 0 ? -1 : 0));
+  assert.deepEqual(spokenKeys(alreadySitting), []);
+  alreadySitting.send(edgeState(4, 14));
+  assert.deepEqual(spokenKeys(alreadySitting), ['satUp']);
+
+  const withSos = createHarness();
+  withSos.send(edgeState(1));
+  withSos.send(edgeState(4, 0, 1));
+  assert.deepEqual(spokenKeys(withSos), ['emergency'], 'SOS still wins over a same-packet bed-edge state');
+});
+
 test('smallBed retains its existing state-based voice alerts independently of jqbed diagnostics', () => {
   const home = createHarness('Home', {}, { matrixName: 'smallBed' });
   home.send({ rate: { stateInBbed: 1, sosflag: 0 } });

@@ -18,22 +18,18 @@ import {
   RocketOutlined,
   CheckCircleOutlined,
 } from "@ant-design/icons";
-import { buildVersionHistory } from "./releaseNoteHistory";
+import {
+  buildLocalizedVersionHistory,
+  selectVersionHistory,
+} from "./releaseNoteHistory";
+import { RELEASE_NOTE_MODULES } from "./releaseNoteSources";
 
-const RELEASE_NOTE_MODULES = import.meta.glob(
-  "../../../../release-notes/windows/*.md",
-  {
-    query: "?raw",
-    import: "default",
-    eager: true,
-  }
-);
-
-// Vite 在构建阶段把 Markdown 原文编译进前端，无需运行时读取磁盘。
-const VERSION_HISTORY = buildVersionHistory(RELEASE_NOTE_MODULES);
+// 三种语言在模块加载时各解析一次，切换语言只是换一份数组。
+const VERSION_HISTORY = buildLocalizedVersionHistory(RELEASE_NOTE_MODULES);
 
 export default function VersionHistory({ onAfterDialogClose } = {}) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const versionHistory = selectVersionHistory(VERSION_HISTORY, i18n.language);
   const [showModal, setShowModal] = useState(false);
   const [currentVersion, setCurrentVersion] = useState("");
 
@@ -103,7 +99,7 @@ export default function VersionHistory({ onAfterDialogClose } = {}) {
           {/* 版本时间线 */}
           <div style={{ maxHeight: 400, overflow: "auto", paddingRight: 8 }}>
             <Timeline
-              items={VERSION_HISTORY.map((item, index) => ({
+              items={versionHistory.map((item, index) => ({
                 color: index === 0 ? "green" : "blue",
                 dot:
                   index === 0 ? (

@@ -1985,7 +1985,9 @@ class Home extends React.Component {
 
     const diagnostics = jsonObject.jqbedAlgorithmDiagnostics;
     if (diagnostics?.sensorType !== 'jqbed') return;
-    for (const alertKey of speechState.observe(diagnostics)) {
+    // 离床按床状态播报：新宿主放在诊断字段里；旧宿主只有同包的 rate 带这个状态。
+    const stateInBbed = diagnostics.stateInBbed ?? jsonObject.rate?.stateInBbed;
+    for (const alertKey of speechState.observe({ ...diagnostics, stateInBbed })) {
       speakLocalizedMessage(
         this.props.t(`home.alerts.${alertKey}`),
         this.props.i18n.language,

@@ -2382,7 +2382,7 @@ export const sitTypeEvent = {
     });
 
     if (!that.state.local) {
-      that.com.current.chartReset()
+      that.com.current?.chartReset()
       // timeflag = 0
     }
   }, smallBedNoAlg({ that, wsPointData, compen }) {
@@ -2401,7 +2401,7 @@ export const sitTypeEvent = {
     });
 
     if (!that.state.local) {
-      that.com.current.chartReset()
+      that.com.current?.chartReset()
     }
   }, xiyueReal1({ that, wsPointData, compen, local }) {
     // console.log(compen)
@@ -2446,7 +2446,7 @@ export const sitTypeEvent = {
     })
 
     if (!that.state.local) {
-      that.com.current.chartReset()
+      that.com.current?.chartReset()
       // timeflag = 0
     }
     // const press = Math.round(wsPointData.reduce((a, b) => a + b, 0)/10)
@@ -2479,7 +2479,7 @@ export const sitTypeEvent = {
       });
 
       if (!that.state.local) {
-        that.com.current.chartReset()
+        that.com.current?.chartReset()
         // timeflag = 0
       }
     }
@@ -2497,7 +2497,7 @@ export const sitTypeEvent = {
       });
 
       if (!that.state.local) {
-        that.com.current.chartReset()
+        that.com.current?.chartReset()
       }
     }
   }, petCare({ that, wsPointData, compen, local }) {
@@ -2517,7 +2517,7 @@ export const sitTypeEvent = {
       });
 
       if (!that.state.local) {
-        that.com.current.chartReset()
+        that.com.current?.chartReset()
       }
     }
 
@@ -2538,7 +2538,7 @@ export const sitTypeEvent = {
       });
 
       if (!that.state.local) {
-        that.com.current.chartReset()
+        that.com.current?.chartReset()
       }
     }
 

@@ -610,6 +610,8 @@ function createPetCareRuntimeService({
             reserved_bytes: Array.isArray(rawData?.reserved_bytes) ? rawData.reserved_bytes : [],
             merged_alarm: rawData?.merged_alarm,
             sosflag: rawData?.sosflag,
+            // ⚠️ 离床语音靠它判断；只放在 rate 里的话，呼吸率为 -1 的帧不下发 rate，离床就不响。
+            stateInBbed: rawData?.stateInBbed,
           };
           if (logRecipients.length) jqbedAlgorithmProtocol?.publishLog(rawOutputs, currentLogContext, logRecipients);
         }

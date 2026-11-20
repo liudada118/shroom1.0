@@ -14,6 +14,7 @@ import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
 import { TextureLoader } from "three";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateback } from "./threeUtil1";
 import { SelectionHelper } from './SelectionHelper.js';
+import { collectSmallBedAsidePoints } from './smallBedAsideStats';
 import {
   addSide,
   gaussBlur_1,
@@ -128,14 +129,22 @@ let isShiftPressed = false;
   const isSmallBedNoAlg = () => props.matrixName === 'smallBedNoAlg';
   const isSmallBed12B = () => props.matrixName === 'smallBed12B';
   const isRawAsideDataMatrix = () => RAW_ASIDE_MATRIX_TYPES.has(props.matrixName);
-  const getRawAsideData = () => (isSmallBedNoAlg() ? [...newData1] : [...ndata1]);
-  const getAsidePointThreshold = () => {
-    if (isSmallBedNoAlg()) return 0;
-    if (isSmallBed12B()) return 0;
-    if (isRawAsideDataMatrix()) return 10;
-    return valuej1 * 0.025;
-  };
-  const getAsidePressDivisor = () => (isRawAsideDataMatrix() ? 1 : 10);
+  /**
+   * 侧栏四项统计（压力总和 / 平均压力 / 峰值压力 / 有效点数）的数据：传感器原始点阵。
+   * ⚠️ 只能取原始点阵。换成 bigArrg1New 这类插值拉伸后的显示网格，32×32 的床「有效点数」会显示 8000 多。
+   * ⚠️ 阈值要按原始值给：显示值是原始值 ×10（interp 里乘的），所以显示阈值 ÷10 才等价，写成 0 会把噪声点算进有效点。
+   * 小床无算法取未过滤的 newData1，其余取过了「过滤」滑块的 ndata1；无算法和 12B 不受框选影响。
+   * @returns {number[]} 有效点的原始值，长度就是有效点数
+   */
+  const getAsideStatsData = () => collectSmallBedAsidePoints({
+    raw: isSmallBedNoAlg() ? newData1 : ndata1,
+    width: sitnum1,
+    height: sitnum2,
+    threshold: isRawAsideDataMatrix() ? 0 : valuej1 * 0.0025,
+    selection: isRawAsideDataMatrix() ? null : sitIndexArr,
+    interp: sitInterp,
+    xStretch,
+  });
   const getAsideChartLimit = () => (isSmallBedNoAlg() ? 60 : 20);
   const getPressureChartData = () => (
     isSmallBedNoAlg()
@@ -630,9 +639,6 @@ let isShiftPressed = false;
 
 
 
-    dataArrRef.current = []
-
-
     let k = 0,
       l = 0;
 
@@ -655,9 +661,7 @@ let isShiftPressed = false;
           if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
           
             rgb = jetWhite4(0, valuej1, smoothBig[l]);
-           
-            dataArrRef.current.push(bigArrg1New[l])
-          } else 
+          } else
           {
             rgb = jetWhite4(0, valuej1, smoothBig[l]);
             // scales1[l] = 1;
@@ -676,23 +680,17 @@ let isShiftPressed = false;
       }
     }
     edgeBufferPoints?.render({ height: value1, color: (value) => jetWhite4(0, valuej1, value), smoothedValues: smoothBig });
-    if (!sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
-      dataArrRef.current = bigArrg1New
-    }
 
 
     var T = clock.getDelta();
     timeS = timeS + T;
-    
+
       const useRawAsideData = isRawAsideDataMatrix()
-      if (useRawAsideData) {
-        dataArrRef.current = getRawAsideData()
-      }
-      dataArrRef.current = dataArrRef.current.filter((a) => a > getAsidePointThreshold())
+      dataArrRef.current = getAsideStatsData()
       const max = findMax(dataArrRef.current)
-      const point = dataArrRef.current.filter((a) => a > 0).length
+      const point = dataArrRef.current.length
       const pressTotal = dataArrRef.current.reduce((a, b) => a + b, 0)
-      const press = isSmallBed12B() ? pressTotal : Math.round(pressTotal / getAsidePressDivisor())
+      const press = isSmallBed12B() ? pressTotal : Math.round(pressTotal)
       const mean = press / (point == 0 ? 1 : point)
       const realPoint = useRawAsideData ? point : ndata1.filter((a) => a > 0).length
       const displayPress = isSmallBed12B() ? max : press
@@ -850,14 +848,11 @@ let isShiftPressed = false;
 
   function chartReset() {
 
-    const useRawAsideData = isRawAsideDataMatrix()
-    const chartData = useRawAsideData
-      ? getRawAsideData().filter((a) => a > getAsidePointThreshold())
-      : (dataArrRef.current || []);
-    const point = chartData.filter((a) => a > 0).length
+    const chartData = getAsideStatsData()
+    const point = chartData.length
     const press = isSmallBed12B()
       ? findMax(chartData)
-      : Math.round(chartData.reduce((a, b) => a + b, 0) / getAsidePressDivisor())
+      : Math.round(chartData.reduce((a, b) => a + b, 0))
     if ( totalArrRef.current.length < getAsideChartLimit()) {
        totalArrRef.current.push(press);
     } else {

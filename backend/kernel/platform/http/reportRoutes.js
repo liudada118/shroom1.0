@@ -186,12 +186,12 @@ function registerReportRoutes(httpApp, {
           });
           return res.json(new HttpResult(0, peakFrame, 'success'));
         } catch (error) {
-          logger.error('[getDbHeatmap] callPy error:', error.message);
+          logger.error('[getDbHeatmap] callPy error', error);
           return res.json(new HttpResult(1, {}, 'callPy error'));
         }
       });
     } catch (error) {
-      logger.error('[getDbHeatmap] error:', error.message);
+      logger.error('[getDbHeatmap] error', error);
       res.status(error.httpStatus || 500).json(new HttpResult(1, {}, error.httpStatus ? error.message : 'error'));
     }
   });
@@ -243,7 +243,7 @@ function registerReportRoutes(httpApp, {
       requireAccess('export');
       res.json(new HttpResult(0, { file: req.file, body: req.body, absolutePath, pdfFilePath, pdfDir: pdfPath }, 'success'));
     } catch (error) {
-      logger.error('[uploadCanvas] error:', error.message);
+      logger.error('[uploadCanvas] error', error);
       res.json(new HttpResult(1, {}, 'upload failed'));
     }
   });

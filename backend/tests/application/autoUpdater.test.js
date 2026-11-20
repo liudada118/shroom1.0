@@ -11,8 +11,9 @@ const rawMac = 'Cannot find channel "latest-mac.yml" update info: HttpError: 404
 
 /** Load the real installer bridge with an isolated updater and IPC transport. */
 function fixture(options = {}, timers = { setTimeout, clearTimeout, setInterval, clearInterval }) {
-  const engine = new EventEmitter(), handlers = new Map(), sent = [], logs = [], businessEvents = [];
+  const engine = new EventEmitter(), handlers = new Map(), sent = [], logs = [], businessEvents = [], feeds = [];
   engine.checkForUpdatesAndNotify = async () => null;
+  engine.setFeedURL = config => feeds.push(config.url);
   engine.downloadUpdate = async () => [];
   engine.quitAndInstall = () => {};
   const filename = path.resolve(__dirname, '../../../app/update/autoUpdater.js');
@@ -24,7 +25,28 @@ function fixture(options = {}, timers = { setTimeout, clearTimeout, setInterval,
     : name === '../../backend/common/businessEvents' ? { recordBusinessEvent: (...args) => businessEvents.push(args) } : nativeRequire(name);
   vm.runInNewContext('(function(require,module,exports){' + fs.readFileSync(filename, 'utf8') + '\n})', { process, ...timers }, { filename })(localRequire, module, module.exports);
   const updater = new module.exports.AppUpdater({ isDestroyed: () => false, webContents: { send: (_channel, payload) => sent.push(payload) } }, { platform: 'darwin', ...options });
-  return { updater, engine, sent, logs, businessEvents, handlers, invoke: data => handlers.get('update-command')({}, data) };
+  return { updater, engine, sent, logs, businessEvents, handlers, feeds, invoke: data => handlers.get('update-command')({}, data) };
+}
+
+const DOMESTIC = 'https://images.jq-industries.com/shroom/software/', OVERSEAS = 'https://shroom.jq-industries.com/shroom1';
+
+/** Make the fake engine fail like the real one (error event plus rejection) for the listed sources. */
+function failSources(app, unreachable, message = 'net::ERR_CONNECTION_TIMED_OUT') {
+  const visited = [];
+  app.engine.checkForUpdatesAndNotify = async () => {
+    const source = app.feeds.at(-1);
+    visited.push(source);
+    app.engine.emit('checking-for-update');
+    if (!unreachable.includes(source)) {
+      app.engine.emit('update-not-available', { version: '1.1.49' });
+      return { updateInfo: { version: '1.1.49' } };
+    }
+    const error = new Error(message);
+    app.engine.logger.error(error);
+    app.engine.emit('error', error);
+    throw error;
+  };
+  return visited;
 }
 
 /** Advance only the updater's timers so interval behavior does not wait four real hours. */
@@ -238,5 +260,83 @@ test('an immediate automatic rejection is safely cached even without an engine e
     await app.invoke({ action: 'getStatus' });
     assert.equal(app.businessEvents.length, observed);
     assert.doesNotMatch(JSON.stringify({ status, logs: app.logs }), /private|token|https?:|Headers|app\.asar/);
+  } finally { app.updater.dispose(); }
+});
+
+test('mainland China time zones check the domestic source first; everywhere else checks the overseas source first', async () => {
+  for (const [timeZone, expected] of [['Asia/Shanghai', DOMESTIC], ['Asia/Urumqi', DOMESTIC], ['PRC', DOMESTIC],
+    ['America/New_York', OVERSEAS], ['Europe/Berlin', OVERSEAS], ['Asia/Hong_Kong', OVERSEAS], ['Asia/Taipei', OVERSEAS], ['Asia/Singapore', OVERSEAS], ['', OVERSEAS]]) {
+    const app = fixture({ timeZone });
+    try {
+      const visited = failSources(app, []);
+      await app.updater.checkForUpdates();
+      assert.deepEqual(visited, [expected], `time zone ${timeZone || '(unknown)'}`);
+    } finally { app.updater.dispose(); }
+  }
+});
+
+test('an unreachable preferred source falls back silently and later checks reuse the reachable source', async () => {
+  for (const [timeZone, preferred, fallback] of [['Europe/Berlin', OVERSEAS, DOMESTIC], ['Asia/Shanghai', DOMESTIC, OVERSEAS]]) {
+    const app = fixture({ timeZone, platform: 'win32' });
+    try {
+      const visited = failSources(app, [preferred]);
+      assert.equal((await app.invoke({ action: 'checkForUpdate' })).updateInfo.version, '1.1.49');
+      assert.deepEqual(visited, [preferred, fallback]);
+      assert.deepEqual(app.sent.map(item => item.type), ['checking-for-update', 'update-not-available'], 'one check, no failure notification');
+      assert.equal(app.logs.filter(item => item.level === 'error').length, 0, 'a recovered check is not an error');
+      assert.equal(app.businessEvents.filter(([, detail]) => detail.action === 'update_failed').length, 0);
+      await app.updater.checkForUpdates();
+      assert.deepEqual(visited, [preferred, fallback, fallback], 'the next check does not wait on the unreachable source again');
+      assert.doesNotMatch(JSON.stringify({ logs: app.logs, sent: app.sent }), /https?:|jq-industries/);
+    } finally { app.updater.dispose(); }
+  }
+});
+
+test('a server-side 5xx from the preferred source also falls back', async () => {
+  for (const message of ['HttpError: 502 Bad Gateway', 'HttpError: 503', 'HttpError: 504 "Headers: { keep-alive: timeout=4 }"']) {
+    const app = fixture({ timeZone: 'Asia/Shanghai', platform: 'win32' });
+    try {
+      const visited = failSources(app, [DOMESTIC], message);
+      assert.equal((await app.invoke({ action: 'checkForUpdate' })).updateInfo.version, '1.1.49');
+      assert.deepEqual(visited, [DOMESTIC, OVERSEAS], message);
+      assert.equal(app.sent.some(item => item.type === 'update-error'), false);
+      assert.equal(app.logs.some(item => item.level === 'error'), false);
+    } finally { app.updater.dispose(); }
+  }
+});
+
+test('both sources unreachable reports exactly one network failure', async () => {
+  const app = fixture({ timeZone: 'America/Chicago', platform: 'win32' });
+  try {
+    const visited = failSources(app, [OVERSEAS, DOMESTIC]);
+    await assert.rejects(app.invoke({ action: 'checkForUpdate' }), /检查网络/);
+    assert.deepEqual(visited, [OVERSEAS, DOMESTIC]);
+    const failures = app.sent.filter(item => item.type === 'update-error');
+    assert.equal(failures.length, 1); assert.equal(failures[0].code, 'UPDATE_NETWORK_UNAVAILABLE');
+    assert.equal(app.sent.filter(item => item.type === 'checking-for-update').length, 1);
+    await assert.rejects(app.updater.checkForUpdates());
+    assert.deepEqual(visited.slice(2), [OVERSEAS, DOMESTIC], 'no source is remembered until one works');
+  } finally { app.updater.dispose(); }
+});
+
+test('release problems are reported from the preferred source instead of being hidden by the other one', async () => {
+  for (const message of ['Cannot find channel latest.yml HttpError: 404', 'sha512 checksum mismatch', 'HttpError: 403']) {
+    const app = fixture({ timeZone: 'Asia/Shanghai', platform: 'win32' });
+    try {
+      const visited = failSources(app, [DOMESTIC], message);
+      await assert.rejects(app.invoke({ action: 'checkForUpdate' }));
+      assert.deepEqual(visited, [DOMESTIC], message);
+      assert.equal(app.sent.filter(item => item.type === 'update-error').length, 1);
+      assert.equal(app.logs.some(item => item.level === 'error'), true);
+    } finally { app.updater.dispose(); }
+  }
+});
+
+test('an explicit feed URL disables region routing and fallback', async () => {
+  const app = fixture({ feedUrl: 'https://example.invalid/custom', timeZone: 'Asia/Shanghai' });
+  try {
+    const visited = failSources(app, ['https://example.invalid/custom']);
+    await assert.rejects(app.updater.checkForUpdates());
+    assert.deepEqual(visited, ['https://example.invalid/custom']);
   } finally { app.updater.dispose(); }
 });

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildLocalizedVersionHistory,
   buildVersionHistory,
   compareSemanticVersions,
   extractVersionFromPath,
   parseReleaseNote,
+  selectVersionHistory,
 } from "./releaseNoteHistory";
 
 describe("releaseNoteHistory", () => {
@@ -61,5 +63,82 @@ describe("releaseNoteHistory", () => {
     expect(
       compareSemanticVersions("2.0.0-beta.10", "2.0.0-beta.2")
     ).toBeGreaterThan(0);
+  });
+
+  it("builds one history per language from separate folders", () => {
+    const history = buildLocalizedVersionHistory({
+      zh: {
+        "/release-notes/windows/1.2.0.md": "Shroom 1.2.0\n\n- 新增回放",
+        "/release-notes/windows/1.1.0.md": "Shroom 1.1.0\n\n- 修复导出",
+      },
+      en: {
+        "/release-notes/windows/en/1.2.0.md": "Shroom 1.2.0\n\n- Added playback",
+        "/release-notes/windows/en/1.1.0.md": "Shroom 1.1.0\n\n- Fixed export",
+      },
+      ja: {
+        "/release-notes/windows/ja/1.2.0.md": "Shroom 1.2.0\n\n- 再生を追加",
+        "/release-notes/windows/ja/1.1.0.md": "Shroom 1.1.0\n\n- エクスポートを修正",
+      },
+    });
+
+    expect(history.zh).toEqual([
+      { version: "1.2.0", changes: ["新增回放"] },
+      { version: "1.1.0", changes: ["修复导出"] },
+    ]);
+    expect(history.en).toEqual([
+      { version: "1.2.0", changes: ["Added playback"] },
+      { version: "1.1.0", changes: ["Fixed export"] },
+    ]);
+    expect(history.ja).toEqual([
+      { version: "1.2.0", changes: ["再生を追加"] },
+      { version: "1.1.0", changes: ["エクスポートを修正"] },
+    ]);
+  });
+
+  it("falls back to Chinese for a release whose translation is missing or empty", () => {
+    const history = buildLocalizedVersionHistory({
+      zh: {
+        "/release-notes/windows/1.2.0.md": "Shroom 1.2.0\n\n- 新增回放",
+        "/release-notes/windows/1.1.0.md": "Shroom 1.1.0\n\n- 修复导出",
+      },
+      en: {
+        "/release-notes/windows/en/1.1.0.md": "Shroom 1.1.0\n\n- Fixed export",
+      },
+      ja: {
+        "/release-notes/windows/ja/1.2.0.md": "Shroom 1.2.0",
+      },
+    });
+
+    expect(history.en).toEqual([
+      { version: "1.2.0", changes: ["新增回放"] },
+      { version: "1.1.0", changes: ["Fixed export"] },
+    ]);
+    expect(history.ja).toEqual([
+      { version: "1.2.0", changes: ["新增回放"] },
+      { version: "1.1.0", changes: ["修复导出"] },
+    ]);
+  });
+
+  it("ignores a translation that has no Chinese source", () => {
+    const history = buildLocalizedVersionHistory({
+      zh: { "/release-notes/windows/1.1.0.md": "Shroom 1.1.0\n\n- 修复导出" },
+      en: {
+        "/release-notes/windows/en/1.1.0.md": "Shroom 1.1.0\n\n- Fixed export",
+        "/release-notes/windows/en/9.9.9.md": "Shroom 9.9.9\n\n- Orphan",
+      },
+    });
+
+    expect(history.en.map((item) => item.version)).toEqual(["1.1.0"]);
+  });
+
+  it("selects the history for the interface language and defaults to Chinese", () => {
+    const history = { zh: ["中"], en: ["en"], ja: ["日"] };
+
+    expect(selectVersionHistory(history, "en")).toEqual(["en"]);
+    expect(selectVersionHistory(history, "ja-JP")).toEqual(["日"]);
+    expect(selectVersionHistory(history, "EN-us")).toEqual(["en"]);
+    expect(selectVersionHistory(history, "fr")).toEqual(["中"]);
+    expect(selectVersionHistory(history, undefined)).toEqual(["中"]);
+    expect(selectVersionHistory(undefined, "en")).toEqual([]);
   });
 });
